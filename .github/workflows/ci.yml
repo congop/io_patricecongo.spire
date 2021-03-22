@@ -70,10 +70,10 @@ jobs:
         chmod a+wrx ./molecule/resources/docker-spire-server/
         echo "----------------------------------------------------------------INIT CMD"
         ps -p 1
-        echo "----------------------------------------------------------------ALL PROCESSES"
-        ps -al
-        echo "----------------------------------------------------------------ALL PROCESSES for spire"
-        su -l -s /bin/bash -l -c "ps -al" spire
+        # echo "----------------------------------------------------------------ALL PROCESSES"
+        # ps -al
+        # echo "----------------------------------------------------------------ALL PROCESSES for spire"
+        # su -l -s /bin/bash -l -c "ps -al" spire
         echo "----------------------------------------------------------------SOME SYSTEMCTL DEBUG HINTS"
         systemctl --version
         systemctl --system --no-pager | echo "system --system is not working yet for user spire"
