@@ -59,14 +59,16 @@ jobs:
     - name: add user spire for pytest tests
       run: |
         id spire 2> /dev/null > /dev/null && echo "user spire exists; skipping creation" && exit 0
-        sudo useradd --user-group --system --create-home --no-log-init --shell /bin/bash spire
+        # sudo useradd --user-group --system --create-home --no-log-init --shell /bin/bash spire
+        sudo useradd -g runner --system --create-home --no-log-init --shell /bin/bash spire
 
     - name:  prepare environment for test user spire
       run: |
-        #!/bin/bash
         # we  know user spire will have to make dirs inside docker-spire-server
         # --> so we are making sure to avoid access denied
-        echo "START DIR:$(pwd)"
+        # Note: we are using <spire> instead of <runner> to avoid messing with
+        #       the original githug actions user <runner>
+        echo -e "START DIR:$(pwd) \n runner user:$(id runner)"
         chmod a+wrx ./molecule/resources/docker-spire-server/
         echo "----------------------------------------------------------------INIT CMD"
         ps -p 1
@@ -109,6 +111,12 @@ jobs:
         pjt_dir=$(pwd)
         sudo su -l -s /bin/bash -c "cd $pjt_dir && env && make dev-pytest-all-local_2_9" spire
       shell: bash
+
+    - name: ensure runner get back ownership to all file
+      run: |
+        # spire has created some file
+        # so we are given ownership back to runner to avoid <<acess denied>>
+        chown -R runner:runner ./molecule/resources/
 
     - name: download spire dists
       run: |
