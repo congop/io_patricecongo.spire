@@ -142,11 +142,13 @@ dev-build-requirements:
 dev-pytest-all-local_2_9:
 	. .venv_2_9/bin/activate && \
 	python --version && \
+	export readiness_probe_timeout_seconds=10.0 && \
 	PYTHONPATH=plugins/:__fake_src python -m pytest -vv tests/**.py
 
 dev-pytest-all-local_2_10:
 	. .venv_2_10/bin/activate && \
 	python --version && \
+	export readiness_probe_timeout_seconds=10.0 && \
 	PYTHONPATH=plugins/:__fake_src python -m pytest -vv tests/**.py
 
 # path in pythonpath have to be absolute:

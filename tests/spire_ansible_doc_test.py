@@ -61,7 +61,7 @@ def check_attr_yaml(mod: ModuleType, attr_name: str) -> Tuple[bool, str]:
         empty-values: enable
         quoted-strings:
             required: false
-            extra-required: ['^.*:\s']
+            extra-required: ['^.*:\\s']
     """
     problems = list(linter.run( input=result, conf=YamlLintConfig(conf)))
     if problems:

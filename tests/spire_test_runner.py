@@ -183,6 +183,11 @@ def chmod(run_command: systemd.CmdExecCallable, mode_to_files: Dict[str,List[str
             if res.failed():
                 raise RuntimeError(f"fail to chmod file: {res}")
 
+def env_float(name: str, _default: float) -> float:
+    fstr = os.environ.get(name,None)
+    if fstr:
+        return float(fstr)
+    return _default
 
 class ServerRunner(SpireComponentRunner, CheckServer):
 
@@ -205,8 +210,8 @@ class ServerRunner(SpireComponentRunner, CheckServer):
         self.trust_domain = "example.org"
         self.bind_port = get_free_port()
         # self.process: subprocess.Popen = None
-        self.readiness_probe_timeout_seconds = 5.0
-        self.shutdown_probe_timeout_seconds = 2.5
+        self.readiness_probe_timeout_seconds = env_float("readiness_probe_timeout_seconds", 5.0)
+        self.shutdown_probe_timeout_seconds = env_float("shutdown_probe_timeout_seconds", 2.5)
         self.service = systemd.SpireComponentService(
                                 service_name=service_name,
                                 run_command=run_command,
@@ -216,7 +221,7 @@ class ServerRunner(SpireComponentRunner, CheckServer):
             run_command=run_command, # self.__run_command, # TODO use def subprocess_run_command
             file_spire_server_bin=self.file_spire_server_bin,
             registration_uds_path=self.registration_uds_path,
-            readiness_probe_timeout_seconds=5.0
+            readiness_probe_timeout_seconds=self.readiness_probe_timeout_seconds
         )
         self.__run_command: systemd.CmdExecCallable = run_command
         self.extra_cleanup_tasks: List[Callable[[], None]] = []
@@ -464,8 +469,8 @@ class AgentRunner(SpireComponentRunner, CheckAgent):
         self.join_token_ttl: int = 600
 
         self.process: subprocess.Popen = None
-        self.readiness_probe_timeout_seconds = 5.0
-        self.shutdown_probe_timeout_seconds = 2.5
+        self.readiness_probe_timeout_seconds = env_float("readiness_probe_timeout_seconds", 5.0)
+        self.shutdown_probe_timeout_seconds = env_float("shutdown_probe_timeout_seconds", 2.5)
         self.spire_agent_join_token: str = None
         self.server_bundle: str = None
 
@@ -476,7 +481,7 @@ class AgentRunner(SpireComponentRunner, CheckAgent):
             run_command=run_command,
             file_spire_agent_bin=self.file_spire_bin,
             socket_path=socket_path,
-            readiness_probe_timeout_seconds=10.0
+            readiness_probe_timeout_seconds=self.readiness_probe_timeout_seconds
         )
 
     def path_config(self) -> str:

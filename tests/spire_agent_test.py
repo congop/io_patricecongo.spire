@@ -124,7 +124,7 @@ def spire_runners() -> Generator[SpireRunners, None, None]:
         except Exception as e:
             server_e = e
 
-        if agent_e is not None or server_e:
+        if agent_e or server_e:
             pytest.fail(f"""teardown was not fully succesfull:
                             server-->{server_e}
                             agent-->{agent_e}
