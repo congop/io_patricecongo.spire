@@ -59,7 +59,7 @@ jobs:
     - name: add user spire for pytest tests
       run: |
         id spire 2> /dev/null > /dev/null && echo "user spire exists; skipping creation" && exit 0
-        useradd --user-group --system --create-home --no-log-init --shell /bin/bash spire
+        sudo useradd --user-group --system --create-home --no-log-init --shell /bin/bash spire
 
     - name:  prepare environment for test user spire
       run: |
@@ -75,14 +75,14 @@ jobs:
         su -l -s /bin/bash -l -c "ps -al" spire
         echo "----------------------------------------------------------------SOME SYSTEMCTL DEBUG HINTS"
         systemctl --version
-        systemctl --system | echo "system --system is not working yet for user spire"
-        systemctl --user | echo "system --user is not working yet for user spire"
+        systemctl --system --no-pager | echo "system --system is not working yet for user spire"
+        systemctl --user --no-pager | echo "system --user is not working yet for user spire"
         echo "----------------------------------------------------------------CONFIG ENV NEEDED by systemctl --user /spire"
-        su -l -s /bin/bash -l -c "echo 'export XDG_RUNTIME_DIR=/run/user/\$(id -u spire)'>> /home/spire/.profile" spire
-        su -l -s /bin/bash -l -c "echo 'export XDG_DATA_HOME=\$HOME/.local/share'>> /home/spire/.profile" spire
-        su -l -s /bin/bash -l -c "echo 'export XDG_CONFIG_HOME=\$HOME/.config'>> /home/spire/.profile" spire
+        sudo su -l -s /bin/bash -l -c "echo 'export XDG_RUNTIME_DIR=/run/user/\$(id -u spire)'>> /home/spire/.profile" spire
+        sudo su -l -s /bin/bash -l -c "echo 'export XDG_DATA_HOME=\$HOME/.local/share'>> /home/spire/.profile" spire
+        sudo su -l -s /bin/bash -l -c "echo 'export XDG_CONFIG_HOME=\$HOME/.config'>> /home/spire/.profile" spire
 
-        su -l -s /bin/bash -l -c "env && systemctl --user" spire
+        sudo su -l -s /bin/bash -l -c "env && systemctl --user --no-pager" spire
       shell: "{0}"
       #shell: bash -l -c {0}
 
@@ -99,13 +99,13 @@ jobs:
     - name: run unit test with ansible 2.10.x
       run: |
         pjt_dir=$(pwd)
-        su -l -s /bin/bash -c "cd $pjt_dir && env && make dev-pytest-all-local_2_10" spire
+        sudo su -l -s /bin/bash -c "cd $pjt_dir && env && make dev-pytest-all-local_2_10" spire
       shell: bash
 
     - name: run unit test with ansible 2.9.x
       run: |
         pjt_dir=$(pwd)
-        su -l -s /bin/bash -c "cd $pjt_dir && env && make dev-pytest-all-local_2_9" spire
+        sudo su -l -s /bin/bash -c "cd $pjt_dir && env && make dev-pytest-all-local_2_9" spire
       shell: bash
 
     - name: download spire dists
