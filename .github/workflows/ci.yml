@@ -83,8 +83,9 @@ jobs:
         sudo su -l -s /bin/bash -l -c "echo 'export XDG_CONFIG_HOME=\$HOME/.config'>> /home/spire/.profile" spire
 
         sudo su -l -s /bin/bash -l -c "env && systemctl --user --no-pager" spire
-      shell: "{0}"
+      #shell: "{0}"
       #shell: bash -l -c {0}
+      shell: bash
 
     - name: create virtual environment with ansible 2.10.x
       run: |
