@@ -116,7 +116,7 @@ jobs:
       run: |
         # spire has created some file
         # so we are given ownership back to runner to avoid <<acess denied>>
-        chown -R runner:runner ./molecule/resources/
+        sudo chown -R runner:runner ./molecule/resources/
 
     - name: download spire dists
       run: |
