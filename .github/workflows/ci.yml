@@ -76,8 +76,8 @@ jobs:
         # su -l -s /bin/bash -l -c "ps -al" spire
         echo "----------------------------------------------------------------SOME SYSTEMCTL DEBUG HINTS"
         systemctl --version
-        systemctl --system --no-pager | echo "system --system is not working yet for user spire"
-        systemctl --user --no-pager | echo "system --user is not working yet for user spire"
+        systemctl --system --no-pager || echo "system --system is not working yet for user spire"
+        systemctl --user --no-pager || echo "system --user is not working yet for user spire"
         echo "----------------------------------------------------------------CONFIG ENV NEEDED by systemctl --user /spire"
         sudo su -l -s /bin/bash -l -c "echo 'export XDG_RUNTIME_DIR=/run/user/\$(id -u spire)'>> /home/spire/.profile" spire
         sudo su -l -s /bin/bash -l -c "echo 'export XDG_DATA_HOME=\$HOME/.local/share'>> /home/spire/.profile" spire
