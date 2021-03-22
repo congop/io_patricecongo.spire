@@ -29,9 +29,6 @@ on:
 jobs:
 
   build:
-    container:
-      image: act_local/runner-ubuntu-20.4
-      options: --entrypoint ['/sbin/init', '--log-target=journal']
     name: CI io_patricecongo.spire
     runs-on: ubuntu-20.04
     strategy:
