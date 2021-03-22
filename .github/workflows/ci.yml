@@ -66,7 +66,8 @@ jobs:
         #!/bin/bash
         # we  know user spire will have to make dirs inside docker-spire-server
         # --> so we are making sure to avoid access denied
-        chmod a+wrx /github/workspace/molecule/resources/docker-spire-server/
+        echo "START DIR:$(pwd)"
+        chmod a+wrx ./molecule/resources/docker-spire-server/
         echo "----------------------------------------------------------------INIT CMD"
         ps -p 1
         echo "----------------------------------------------------------------ALL PROCESSES"
