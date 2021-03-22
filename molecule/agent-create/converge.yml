@@ -1,0 +1,92 @@
+##
+## Copyright (c) 2021 Patrice Congo <@congop>.
+##
+## This file is part of io_patricecongo.spire
+## (see https://github.com/congop/io_patricecongo.spire).
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program. If not, see <http://www.gnu.org/licenses/>.##
+---
+- name: Gather Localhost facts
+  hosts: localhost
+  tasks:
+    - name: gather localhost facts
+      gather_facts:
+
+    - name: list colllections
+      shell:
+        cmd: "ansible-galaxy collection list || true"
+      register: collection_list_out_local
+      #delegate_to: 127.0.0.1
+      changed_when: false
+
+    - name: tree molecule collection cache
+      shell:
+        cmd: ansible-playbook  --version && echo && echo ANSIBLE_COLLECTIONS_PAT=$ANSIBLE_COLLECTIONS_PATH && tree ${MOLECULE_EPHEMERAL_DIRECTORY}/collections
+      register: collection_dir_molecule_cache_tree_out_local
+      #delegate_to: 127.0.0.1
+      changed_when: false
+
+    - name: "debug me"
+      debug:
+        msg:
+          - "############################: collection list: {{collection_list_out_local}}"
+          - "############################: tree collection dir {{ collection_dir_molecule_cache_tree_out_local }}"
+
+- name: Converge
+  hosts: spire_agent
+  # strategy: debug
+  tasks:
+
+    - name: "spire agent created"
+      io_patricecongo.spire.spire_agent:
+        state: "present"
+        substate_service_installation: "enabled"
+        substate_service_status: "healthy"
+        substate_agent_registered: "yes"
+
+        #node_spiffe_id: "spiffe://example.org/myagent"
+
+        spire_server_install_dir: "/opt/spire"
+        spire_server_host: "spire_server" # ansible host of the spire server
+        spire_server_address: "spire_server" # ip or address bind by spire-server, at which its api is served
+        spire_server_port: 8081
+
+        spire_agent_config_dir: "/etc/spire-agent"
+        spire_agent_data_dir: "/var/lib/spire-agent/data/agent"
+        spire_agent_install_dir: "/opt/spire-agent/"
+        spire_agent_service_dir: "/etc/systemd/system"
+        spire_agent_install_file_owner: "root"
+        spire_agent_install_file_mode: "u=xrw,g=xr,o=xr"
+        spire_agent_install_file_mode_exe: "u=xrw,g=xr,o=xr"
+        spire_agent_version: "0.10.1"
+        spire_agent_additional_spiffe_id: "spiffe://example.org/agent/local1"
+        spire_agent_join_token_ttl: 600
+        spire_agent_log_level: "DEBUG"
+        spire_agent_trust_domain: "example.org"
+        spire_agent_socket_path: "/tmp/agent.sock"
+        spire_agent_log_dir: spire_agent_log_dir
+        spire_agent_service_params_name: "spire_agent"
+        spire_agent_service_params_scope: "system"
+        spire_agent_healthiness_probe_timeout_seconds: 15
+
+        spire_download_url: "file://{{ lookup('env','MOLECULE_PROJECT_DIRECTORY') }}/molecule/resources/docker-spire-server/.download/spire-0.10.1-linux-x86_64-glibc.tar.gz"
+      become: yes
+      register: spire_agent_creation_result
+
+    - name: Output spire agent creation result
+      copy:
+        content:  "{{ spire_agent_creation_result }}"
+        dest: /tmp/spire_agent_creation_result.json
+        mode: u=rw,g=xr
+      changed_when: false

@@ -1,0 +1,136 @@
+##
+## Copyright (c) 2021 Patrice Congo <@congop>.
+##
+## This file is part of io_patricecongo.spire
+## (see https://github.com/congop/io_patricecongo.spire).
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program. If not, see <http://www.gnu.org/licenses/>.##
+
+
+name: ci for io_patricecongo.spire
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+    container:
+      image: act_local/runner-ubuntu-20.4
+      options: --entrypoint ['/sbin/init', '--log-target=journal']
+    name: CI io_patricecongo.spire
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version: ['3.6']
+    steps:
+    - name: install make tree
+      run: |
+        sudo apt update
+        sudo apt install -y tree make
+
+    # - uses: docker/setup-buildx-action@v1
+    #   id: buildx
+    #   with:
+    #     install: true
+
+    - uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Check out
+      uses: actions/checkout@v2
+
+    - name: create fake src directory structure
+      run: make dev-local-fake-src-for-ansible-collections
+      shell: bash
+
+    - name: add user spire for pytest tests
+      run: |
+        id spire 2> /dev/null > /dev/null && echo "user spire exists; skipping creation" && exit 0
+        useradd --user-group --system --create-home --no-log-init --shell /bin/bash spire
+
+    - name:  prepare environment for test user spire
+      run: |
+        #!/bin/bash
+        # we  know user spire will have to make dirs inside docker-spire-server
+        # --> so we are making sure to avoid access denied
+        chmod a+wrx /github/workspace/molecule/resources/docker-spire-server/
+        echo "----------------------------------------------------------------INIT CMD"
+        ps -p 1
+        echo "----------------------------------------------------------------ALL PROCESSES"
+        ps -al
+        echo "----------------------------------------------------------------ALL PROCESSES for spire"
+        su -l -s /bin/bash -l -c "ps -al" spire
+        echo "----------------------------------------------------------------SOME SYSTEMCTL DEBUG HINTS"
+        systemctl --version
+        systemctl --system | echo "system --system is not working yet for user spire"
+        systemctl --user | echo "system --user is not working yet for user spire"
+        echo "----------------------------------------------------------------CONFIG ENV NEEDED by systemctl --user /spire"
+        su -l -s /bin/bash -l -c "echo 'export XDG_RUNTIME_DIR=/run/user/\$(id -u spire)'>> /home/spire/.profile" spire
+        su -l -s /bin/bash -l -c "echo 'export XDG_DATA_HOME=\$HOME/.local/share'>> /home/spire/.profile" spire
+        su -l -s /bin/bash -l -c "echo 'export XDG_CONFIG_HOME=\$HOME/.config'>> /home/spire/.profile" spire
+
+        su -l -s /bin/bash -l -c "env && systemctl --user" spire
+      shell: "{0}"
+      #shell: bash -l -c {0}
+
+    - name: create virtual environment with ansible 2.10.x
+      run: |
+        make dev-create-venv_2_10
+      shell: bash
+
+    - name: create virtual environment with ansible 2.9.x
+      run: |
+        make dev-create-venv_2_9
+      shell: bash
+
+    - name: run unit test with ansible 2.10.x
+      run: |
+        pjt_dir=$(pwd)
+        su -l -s /bin/bash -c "cd $pjt_dir && env && make dev-pytest-all-local_2_10" spire
+      shell: bash
+
+    - name: run unit test with ansible 2.9.x
+      run: |
+        pjt_dir=$(pwd)
+        su -l -s /bin/bash -c "cd $pjt_dir && env && make dev-pytest-all-local_2_9" spire
+      shell: bash
+
+    - name: download spire dists
+      run: |
+        make -f molecule/resources/docker-spire-server/Makefile spire-distribution-cached-locally
+      shell: bash
+
+    - name: make all docker images for molecule test
+      run: make -f molecule/resources/docker-spire-server/Makefile docker-build-all-images
+      shell: bash
+
+    - name: make ansible galaxy distribution
+      run: |
+        make dev-ansible-galaxy-dist
+
+    - name: run molecule integration test with ansible 2.10.x
+      run: |
+        make dev-molecule-all-local_2_10
+      shell: bash
+
+    - name: run molecule integration test with ansible 2.9.x
+      run: |
+        make dev-molecule-all-local_2_9
+      shell: bash
+

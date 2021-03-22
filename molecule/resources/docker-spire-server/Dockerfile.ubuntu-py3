@@ -1,0 +1,53 @@
+# This is a Jinja2 file, not using .j2 suffix to have docker highlighting and autocompletion
+#   - using absolute path when copying because the molecule provisioner will create the final
+#     Dockerfile in ${MOLECULE_EPHEMERAL_DIRECTORY}/Dockerfile_xyz.
+#     relative path will therefore not work.
+#   - !?! make be this is some kind of profisioning which is supposed to be done be ansible.
+#
+# systemd within docker container see:
+#   https://github.com/bdellegrazie/docker-ubuntu-systemd/blob/master/Dockerfile
+FROM ubuntu:bionic-20200903
+
+ENV APT_PROXY "http://172.17.0.1:3142"
+ENV DEBIAN_FRONTEND noninteractive
+
+COPY .download/requirements.txt /tmp/requirements.txt
+RUN if [ $APT_PROXY ]; then sed -i 's/https:\/\//http:\/\/HTTPS\/\/\//' /etc/apt/sources.list; fi \
+    && if [ $APT_PROXY ]; then echo  "Acquire::http::Proxy \"$APT_PROXY\";" | tee /etc/apt/apt.conf.d/00aptproxy ; fi \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y python3 python3-pip sudo bash ca-certificates iproute2 \
+        python3-apt aptitude \
+        dbus systemd systemd-cron rsyslog \
+        libpam-systemd \
+    && apt-get clean \
+    && python3 -m pip install -U pip \
+    && python3 -m pip install -U cryptography \
+    && python3 -m pip install -r /tmp/requirements.txt \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /etc/apt/apt.conf.d/00aptproxy \
+    ;
+
+RUN sed -i 's/^\(module(load="imklog")\)/#\1/' /etc/rsyslog.conf
+# Don't start any optional services except for the few we need.
+RUN find /etc/systemd/system \
+    /lib/systemd/system \
+    -path '*.wants/*' \
+    -not -name '*dbus*' \
+    -not -name '*journald*' \
+    -not -name '*systemd-tmpfiles*' \
+    -not -name '*systemd-user-sessions*' \
+    -exec rm \{} \;
+
+RUN systemctl set-default multi-user.target
+RUN systemctl mask dev-hugepages.mount sys-fs-fuse-connections.mount
+
+RUN useradd --user-group --system --create-home --no-log-init --shell /bin/bash spire \
+    ;
+USER spire
+RUN echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> ~/.pam_environment
+
+USER root
+#CMD sleep 1h
+VOLUME ["/sys/fs/cgroup", "/tmp", "/run", "/run/lock"]
+STOPSIGNAL SIGRTMIN+3
+
+CMD ["/sbin/init", "--log-target=journal"]

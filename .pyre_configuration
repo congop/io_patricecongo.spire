@@ -1,0 +1,12 @@
+{
+  "binary": ".venv_2_10/bin/pyre.bin",
+  "source_directories": [
+    "plugins", "tests"
+  ],
+  "search_path": [
+    "__fake_src", ".venv_2_10/lib/python3.6/site-packages"
+  ],
+  "taint_models_path": ".venv_2_10/lib/pyre_check/taint/",
+  "typeshed": ".venv_2_10/lib/pyre_check/typeshed/",
+  "strict": true
+}

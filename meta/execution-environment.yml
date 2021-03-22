@@ -1,0 +1,4 @@
+#TODO this does not seam to work? do you know how it is supposed to work?
+dependencies:
+  python: requirements.txt
+version: 1

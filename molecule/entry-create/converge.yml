@@ -1,0 +1,44 @@
+##
+## Copyright (c) 2021 Patrice Congo <@congop>.
+##
+## This file is part of io_patricecongo.spire
+## (see https://github.com/congop/io_patricecongo.spire).
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program. If not, see <http://www.gnu.org/licenses/>.##
+---
+- name: Converge
+  hosts: localhost
+  tasks:
+    - name: "Include ansible-modules-spire"
+      delegate_to: spire_server
+      io_patricecongo.spire.spire_spiffe_id:
+        #admin: no
+        dns_name:
+          - node1.local1
+          - node1.local2
+        downstream: no
+        #entry_expiry:
+        #federates_With:
+        #identity_args: ???
+        #node: no  ???? Unsupported cmd_param_key=node ---> check it
+        parent_id: spiffe://example.org/myagent
+        #registration_uds_path
+        selector:
+          - unix:user:etcd
+          - unix:gid:1000
+        spiffe_id: spiffe://example.org/myagent/etcd
+        spire_server_cmd: /opt/spire/bin/spire-server
+        #state:
+        #ttl:
+

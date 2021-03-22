@@ -1,0 +1,17 @@
+## spire agent
+###############################################################################
+
+[Unit]
+Description=spire-agent
+Documentation=
+
+[Service]
+Type=simple
+EnvironmentFile={{ spire_agent_config_dir }}/agent.env
+ExecStart={{ spire_agent_install_dir }}/bin/spire-agent run -expandEnv -config {{ spire_agent_config_dir }}/agent.conf
+#RemainAfterExit=no
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

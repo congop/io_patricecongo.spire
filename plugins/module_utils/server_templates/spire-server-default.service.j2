@@ -1,0 +1,17 @@
+## spire server
+###############################################################################
+
+[Unit]
+Description=spire-server
+Documentation=
+
+[Service]
+Type=simple
+EnvironmentFile={{ spire_server_config_dir }}/server.env
+ExecStart={{ spire_server_install_dir }}/bin/spire-server run -expandEnv -config {{ spire_server_config_dir }}/server.conf
+#RemainAfterExit=no
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

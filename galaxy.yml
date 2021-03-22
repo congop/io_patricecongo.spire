@@ -1,0 +1,76 @@
+##
+## Copyright (c) 2021 Patrice Congo <@congop>.
+##
+## This file is part of io_patricecongo.spire
+## (see https://github.com/congop/io_patricecongo.spire).
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program. If not, see <http://www.gnu.org/licenses/>.##
+
+---
+authors:
+  - Patrice Congo (@congop)
+#dependencies:
+
+license_file: LICENSE
+name: spire
+namespace: io_patricecongo
+readme: README.md
+repository: https://github.com/congop/io_patricecongo.spire
+tags: [spire, spiffe, identity, "cloud native"]
+version: 0.1.0
+
+build_ignore:
+  - ".download"
+  - "*/.download/*"
+  - ".venv"
+  - ".venv_devel"
+  - ".venv_2_10"
+  - ".venv_2_9"
+  - ".git"
+  - ".fake_src"
+  - "__fake_src"
+  - "__fake_src_stubs"
+  - ".tox"
+  - "*mypy_cache"
+  - "*/__pycache__/*"
+  - '*.tar.gz'
+  - ".gitignore"
+  - ".coverage"
+  - ".pytest_cache"
+  - "activate"
+  - ".vscode"
+  - "plugins/ansible_modules_spire.egg-info"
+  - "library"
+  - "my-notes.txt"
+  - "blabla.txt"
+  - "blabla.yml"
+  - "out"
+  - ".pyre"
+  - ".wheels_requirements"
+  - ".idea"
+  - ".tmp-inst-collection"
+  - ".tmp"
+  - "build-tools"
+  - ".act"
+  - ".github"
+  - "tox.ini"
+  - "mypy.ini"
+  - "pytestdebug.log"
+  - "gpl-v3.tmpl"
+  - "Makefile"
+  - "molecule"
+  - ".pyre_configuration"
+  - "setup.py"
+  - ".yamllint"
+

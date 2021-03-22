@@ -1,0 +1,48 @@
+server {
+    bind_address = "{{ spire_server_address }}"
+    bind_port = "{{ spire_server_port }}"
+    trust_domain = "{{ spire_server_trust_domain }}"
+    data_dir = "{{ spire_server_data_dir }}"
+    log_level = "{{spire_server_log_level}}"
+    log_format = "{{spire_server_log_format}}"
+    log_file="{{ spire_server_log_dir }}/spire-server.log"
+    default_svid_ttl = "48h"
+
+    ca_key_type = "{{spire_server_ca_key_type}}"
+    ca_ttl = "{{spire_server_ca_ttl}}"
+
+    ca_subject {
+      common_name = "{{spire_server_ca_subject_commom_name}}"
+      country = ["{{spire_server_ca_subject_country}}"]
+      organization = ["{{spire_server_ca_subject_organization}}"]
+    }
+
+    jwt_issuer = "{{ spire_server_jwt_issuer }}"
+    registration_uds_path = "{{ spire_server_registration_uds_path }}"
+}
+
+plugins {
+    {% for server_plugin in spire_server_plugins |sort(attribute='type') %}
+    {{ server_plugin.type }} "{{ server_plugin.name}}" {
+        plugin_data {
+            {% for key, value in server_plugin.data.items() %}
+            {{ key }} = "{{ value }}"
+            {% endfor %}
+        }
+
+        {% for entry in server_plugin | dict2items |rejectattr("key", "in", ["data", "type", "name"]) %}
+        {{ entry.key }} = "{{ entry.value }}"
+        {% endfor %}
+    }
+    {% endfor %}
+
+}
+
+{#
+DataStore "sql" {
+    plugin_data {
+        database_type = "sqlite3"
+        connection_string = "./data/server/datastore.sqlite3"
+    }
+}
+#}

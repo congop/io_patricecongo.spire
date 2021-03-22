@@ -1,0 +1,46 @@
+{
+  "files.watcherExclude": {
+    "**/.tox/**": true,
+    "**/.venv/**": true,
+    "**/.venv_devel/**":true,
+    "**/.venv_ansible4_10/**":true,
+    "**/.venv_2_10/**":true,
+    "**/.venv_2_9/**":true,
+    "**/*.egg-info/**": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/*/**": true,
+    "**/.mypy_cache/*/**": true,
+  },
+  "python.pythonPath": ".venv_2_10/bin/python",
+  "python.testing.pytestArgs": [
+    "tests",
+    "-v",
+    "--capture=no",
+    "--full-trace"
+  ],
+  "python.testing.unittestEnabled": false,
+  "python.testing.nosetestsEnabled": false,
+  "python.testing.pytestEnabled": true,
+  "python.envFile": "${workspaceFolder}/.vscode/.env",
+  "files.exclude": {
+    "**/.classpath": true,
+    "**/.project": true,
+    "**/.settings": true,
+    "**/.factorypath": true
+  },
+  "terminal.integrated.scrollback": 8000,
+  "python.testing.pytestPath": "pytest -v --capture=sys",
+  "launch": {
+
+    "configurations": [],
+    "compounds": []
+  },
+  "python.linting.enabled": true,
+  "python.linting.mypyEnabled": true,
+  "python.venvPath": ".venv_2_10",
+  "python.analysis.extraPaths": [
+    "__fake_src"
+  ],
+
+}

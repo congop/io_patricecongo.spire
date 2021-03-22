@@ -1,0 +1,121 @@
+##
+## Copyright (c) 2021 Patrice Congo <@congop>.
+##
+## This file is part of io_patricecongo.spire
+## (see https://github.com/congop/io_patricecongo.spire).
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program. If not, see <http://www.gnu.org/licenses/>.##
+---
+- name: Gather Localhost facts
+  hosts: localhost
+  tasks:
+    - name: gather localhost facts
+      gather_facts:
+
+    - name: list colllections
+      shell:
+        cmd: "ansible-galaxy collection list || true"
+      register: collection_list_out_local
+      #delegate_to: 127.0.0.1
+      changed_when: false
+
+    - name: tree molecule collection cache
+      shell:
+        cmd: ansible-playbook  --version && echo && echo ANSIBLE_COLLECTIONS_PAT=$ANSIBLE_COLLECTIONS_PATH && tree ${MOLECULE_EPHEMERAL_DIRECTORY}/collections
+      register: collection_dir_molecule_cache_tree_out_local
+      #delegate_to: 127.0.0.1
+      changed_when: false
+
+    # spire cannot bind by hostname
+    #   error: spire_server spire-server[2640]: could not parse bind_address "spire_server"
+    # we are therefore using docker to get the actual ip for binding
+    - name: get spire_server ip
+      shell:
+        cmd:  >-
+          {% raw %}
+          docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' spire_server
+          {% endraw %}
+      register: spire_server_ip
+      changed_when: false
+
+    - name: "debug me"
+      debug:
+        msg:
+          - "spire_server_address: {{ spire_server_ip.stdout }}"
+          - "############################: collection list: {{collection_list_out_local}}"
+          - "############################: tree collection dir {{ collection_dir_molecule_cache_tree_out_local }}"
+
+- name: Converge
+  hosts: spire_server
+  # strategy: debug
+  tasks:
+
+    - name: "spire server created"
+      io_patricecongo.spire.spire_server:
+        state: "present"
+        substate_service_installation: "enabled"
+        substate_service_status: "healthy"
+
+        spire_server_address: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+        spire_server_port: 8081
+
+        spire_server_config_dir: "/etc/spire-server"
+        spire_server_data_dir: "/var/lib/spire-server-data/"
+        spire_server_install_dir: "/opt/spire-server"
+        spire_server_service_dir: "/etc/systemd/system"
+        #spire_server_service_dir: "/usr/lib/systemd/user/"
+        spire_server_install_file_owner: "root"
+        spire_server_install_file_mode: "u=xrw,g=xr,o=xr"
+        spire_server_install_file_mode_exe: "u=xrw,g=xr,o=xr"
+        spire_server_version: "0.10.1"
+        spire_server_log_level: "DEBUG"
+        spire_server_log_format: "text"
+        spire_server_trust_domain: "example.org"
+        spire_server_registration_uds_path: "/tmp/spire-registration.sock"
+        spire_server_log_dir: "/var/log/spire-server"
+        spire_server_service_name: "spire_server"
+        spire_server_service_scope: "system"
+        spire_server_healthiness_probe_timeout_seconds: 15
+
+        spire_download_url: "file://{{ lookup('env','MOLECULE_PROJECT_DIRECTORY') }}/molecule/resources/docker-spire-server/.download/spire-0.10.1-linux-x86_64-glibc.tar.gz"
+
+        spire_server_ca_key_type: "ec-p256"
+        spire_server_ca_ttl: "168h"
+        spire_server_ca_subject_commom_name: "molecule_test_server_create"
+        spire_server_ca_subject_country: "de"
+        spire_server_ca_subject_organization: "dev"
+        spire_server_jwt_issuer: "molecule_test_server_create"
+
+        spire_server_plugins:
+          - type: "DataStore"
+            name: "sql"
+            data:
+              database_type: "sqlite3"
+              connection_string: "/var/lib/spire-server-data/datastore.sqlite3"
+          - type: "KeyManager"
+            name: "disk"
+            data:
+              keys_path: "/var/lib/spire-server-data/keys.json"
+          - type: "NodeAttestor"
+            name: "join_token"
+            data: {}
+      become: yes
+      register: spire_server_creation_result
+
+    - name: Output spire agent creation result
+      copy:
+        content:  "{{ spire_server_creation_result }}"
+        dest: /tmp/spire_server_creation_result.json
+        mode: u=rw,g=xr
+      changed_when: false

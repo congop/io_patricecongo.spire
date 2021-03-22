@@ -1,0 +1,101 @@
+##
+## Copyright (c) 2021 Patrice Congo <@congop>.
+##
+## This file is part of io_patricecongo.spire
+## (see https://github.com/congop/io_patricecongo.spire).
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program. If not, see <http://www.gnu.org/licenses/>.##
+
+FROM catthehacker/ubuntu:runner-20.04
+#FROM ubuntu:bionic-20200903
+#ENTRYPOINT [ "/bin/sh", "-c" ]
+#ENTRYPOINT ["/usr/bin/env"]
+#ENTRYPOINT [ ]
+#SHELL [ "/bin/bash"]
+SHELL [ "/bin/bash", "-c" ]
+
+USER root
+
+ENV APT_PROXY "http://172.17.0.1:3142"
+ENV DEBIAN_FRONTEND noninteractive
+
+# make sure locales are set something which makes python happy
+#   - default seems to be ascii
+#   - which breaks some pip-lib-installation and datetime.strptime
+ENV LC_ALL C.UTF-8
+ENV LC_TIME C.UTF-8
+ENV LANG C.UTF-8
+
+RUN if [ $APT_PROXY ]; then sed -i 's/https:\/\//http:\/\/HTTPS\/\/\//' /etc/apt/sources.list; fi \
+    && if [ $APT_PROXY ]; then echo  "Acquire::http::Proxy \"$APT_PROXY\";" | tee /etc/apt/apt.conf.d/00aptproxy ; fi \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y python3 python3-pip sudo bash ca-certificates iproute2 \
+        python3-apt aptitude tree make \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /etc/apt/apt.conf.d/00aptproxy \
+    ;
+
+    # && apt install -y  dbus systemd systemd-cron rsyslog \
+    #     libpam-systemd \
+#RUN sed -i 's/^\(module(load="imklog")\)/#\1/' /etc/rsyslog.conf
+
+# Don't start any optional services except for the few we need.
+# RUN find /etc/systemd/system \
+#     /lib/systemd/system \
+#     -path '*.wants/*' \
+#     -not -name '*dbus*' \
+#     -not -name '*journald*' \
+#     -not -name '*systemd-tmpfiles*' \
+#     -not -name '*systemd-user-sessions*' \
+#     -exec rm \{} \;
+
+# We will not need any usual systemd service
+# we will instead enable docker-systemctl-replacement
+# the aim here is to enable posibility to start spire with systemctl in the user scope
+#   without dealing with all the issues associated with systemd in docker
+# @see: https://github.com/gdraheim/docker-systemctl-replacement/archive/v1.5.4505.tar.gz
+RUN rm -rf /etc/systemd/system/*
+RUN rm -rf /lib/systemd/system/*
+RUN rm -rf /usr/lib/systemd/user/*
+RUN rm -rf /lib/systemd/user/*
+ADD  .download/docker-systemctl-*/files/docker/*.py /docker-systemctl/
+RUN rm /usr/bin/systemctl
+RUN rm /usr/bin/journalctl
+RUN ln -sf /docker-systemctl/systemctl3.py /usr/bin/systemctl
+RUN ln -sf /docker-systemctl/journalctl3.py /usr/bin/journalctl
+RUN ln -sf /docker-systemctl/systemctl3.py /bin/systemctl
+RUN ln -sf /docker-systemctl/journalctl3.py /bin/journalctl
+#smoke testing that systemctl replacement is in place
+RUN tree /docker-systemctl/
+RUN /docker-systemctl/systemctl3.py --user list-units
+RUN systemctl --user list-units
+
+
+# RUN useradd --user-group --system --create-home --no-log-init --shell /bin/bash spire \
+#     ;
+# USER spire
+# RUN echo "export XDG_RUNTIME_DIR=/run/user/\$(id -u spire)" >> ~/.profile
+# RUN echo "export XDG_DATA_HOME=\$HOME/.local/share" >> ~/.profile
+# RUN echo "export XDG_CONFIG_HOME=\$HOME/.config" >> ~/.profile
+
+USER root
+#CMD sleep 1h
+VOLUME ["/sys/fs/cgroup", "/tmp", "/run", "/run/lock"]
+STOPSIGNAL SIGRTMIN+3
+
+# CMD ["/sbin/init", "--log-target=journal"]
+
+
+
+#RUN ls / && ls -al /docker-systemctl && exit 1

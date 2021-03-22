@@ -1,0 +1,63 @@
+##
+## Copyright (c) 2021 Patrice Congo <@congop>.
+##
+## This file is part of io_patricecongo.spire
+## (see https://github.com/congop/io_patricecongo.spire).
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program. If not, see <http://www.gnu.org/licenses/>.##
+
+# Provides base configuration for other scenarions
+# activates by: molecule -c .../base_molecule.yml
+# feature provided are:
+#   - collection setup
+#   - basic host setup which configures:
+#     - virutal-env python for localhost and python3 for ansible nodes
+# to override host setting
+#   add provisioner configuration to scenario molecule.yml
+#   e.g.:
+#     provisioner:
+#        name: ansible
+#        inventory:
+#          links:
+#            hosts: path to scenarion hosts.yml prefer absolute path ${MOLECULE_SCENARION_DIRECTORY}/hosts.yml
+
+
+dependency:
+  name: shell
+  command: python molecule/resources/tool-install-collection.py
+
+
+driver:
+  name: docker
+
+provisioner:
+  name: ansible
+  inventory:
+    links:
+      hosts: ${MOLECULE_PROJECT_DIRECTORY}/molecule/resources/hosts.yml
+  env:
+    MOLECULE_LOCAL_DOCKER_BASE: "${MOLECULE_PROJECT_DIRECTORY}/molecule/resources/docker-spire-server"
+    PROJECT_ANSIBLE_PYTHON_INTERPRETER: "${VIRTUAL_ENV}/bin/python3"
+    SPIRE_VERSION: "0.10.1"
+    SPIRE_VERSION_UPGRADE: "0.11.2"
+    ANSIBLE_KEEP_REMOTE_FILES: 1
+
+  log: True
+  options:
+    vvv: True
+
+verifier:
+  name: testinfra
+  options:
+    "vvv": "true"
