@@ -24,12 +24,12 @@
 #   - !?! make be this is some kind of profisioning which is supposed to be done be ansible.
 #
 FROM ubuntu:bionic-20200713
-
-ENV APT_PROXY "http://172.17.0.1:3142"
+ARG APT_PROXY
 ENV DEBIAN_FRONTEND noninteractive
 
 
-RUN if [ $APT_PROXY ]; then sed -i 's/https:\/\//http:\/\/HTTPS\/\/\//' /etc/apt/sources.list; fi \
+RUN    if [ $APT_PROXY ]; then echo "######################## Will configure Apt Cacher NG as Proxy: $APT_PROXY"; fi \
+    && if [ $APT_PROXY ]; then sed -i 's/https:\/\//http:\/\/HTTPS\/\/\//' /etc/apt/sources.list; fi \
     && if [ $APT_PROXY ]; then echo  "Acquire::http::Proxy \"$APT_PROXY\";" | tee /etc/apt/apt.conf.d/00aptproxy ; fi \
     && apt-get update \
     && apt-get install -y python3 python3-pip sudo bash ca-certificates iproute2 python3-apt aptitude \

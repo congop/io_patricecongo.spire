@@ -63,7 +63,8 @@ docker-build-spire-server: docker-copy-rquirements-txt-to-context
 	&& 	if [[ -n $$IMG_SPIRE_SERVER_FOUND ]]; then \
 				echo "Image [ $$IMG_SPIRE_SERVER_FOUND ] found --> skipping docker build"; \
 			else \
-				docker build . -t molecule_local/ubuntu-spire-server; \
+				APT_PROXY="$$(./detect-host-apt-proxy.sh)"; \
+				docker build -t molecule_local/ubuntu-spire-server --build-arg "APT_PROXY=$$APT_PROXY" .; \
 			fi
 
 docker-build-ubuntu-py3: docker-copy-rquirements-txt-to-context
@@ -72,7 +73,8 @@ docker-build-ubuntu-py3: docker-copy-rquirements-txt-to-context
 	&& 	if [[ -n $$IMG_UBUNTU_PY3 ]]; then \
 				echo "Image [ $$IMG_UBUNTU_PY3 ] found --> skipping docker build"; \
 			else \
-				docker build -f ./Dockerfile.ubuntu-py3 -t molecule_local/ubuntu-py3 .; \
+				APT_PROXY="$$(./detect-host-apt-proxy.sh)"; \
+				docker build -f ./Dockerfile.ubuntu-py3 -t molecule_local/ubuntu-py3 --build-arg "APT_PROXY=$$APT_PROXY" .; \
 			fi
 
 docker-build-all-images: docker-build-spire-server docker-build-ubuntu-py3

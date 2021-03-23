@@ -8,11 +8,13 @@
 #   https://github.com/bdellegrazie/docker-ubuntu-systemd/blob/master/Dockerfile
 FROM ubuntu:bionic-20200903
 
-ENV APT_PROXY "http://172.17.0.1:3142"
+ARG APT_PROXY
+#ENV APT_PROXY "http://172.17.0.1:3142"
 ENV DEBIAN_FRONTEND noninteractive
 
 COPY .download/requirements.txt /tmp/requirements.txt
-RUN if [ $APT_PROXY ]; then sed -i 's/https:\/\//http:\/\/HTTPS\/\/\//' /etc/apt/sources.list; fi \
+RUN    if [ $APT_PROXY ]; then echo "######################## Will configure Apt Cacher NG as Proxy: $APT_PROXY"; fi \
+    && if [ $APT_PROXY ]; then sed -i 's/https:\/\//http:\/\/HTTPS\/\/\//' /etc/apt/sources.list; fi \
     && if [ $APT_PROXY ]; then echo  "Acquire::http::Proxy \"$APT_PROXY\";" | tee /etc/apt/apt.conf.d/00aptproxy ; fi \
     && apt-get update \
     && apt-get install --no-install-recommends -y python3 python3-pip sudo bash ca-certificates iproute2 \
