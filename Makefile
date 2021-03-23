@@ -154,13 +154,15 @@ dev-pytest-all-local_2_10:
 # path in pythonpath have to be absolute:
 #		otherwise the ansible_collections in test-infra cannot be discovered
 dev-molecule-all-local_2_9:
-	. .venv_2_9/bin/activate && \
+	build-tools/ensure-local-bridge-network-available.sh molecule-net && \
+	source .venv_2_9/bin/activate && \
 	python --version && \
 	PYTHONPATH=$(FAKE_SRC_DIR):$(PJT_MKFILE_ABSDIR)/tests \
 		molecule -c $(PJT_MKFILE_ABSDIR)/molecule/resources/base_molecule.yml test --all
 
 dev-molecule-all-local_2_10:
-	. .venv_2_10/bin/activate && \
+	build-tools/ensure-local-bridge-network-available.sh molecule-net && \
+	source .venv_2_10/bin/activate && \
 	python --version && \
 	PYTHONPATH=$(FAKE_SRC_DIR):$(PJT_MKFILE_ABSDIR)/tests \
 		molecule -c $(PJT_MKFILE_ABSDIR)/molecule/resources/base_molecule.yml test --all
