@@ -23,23 +23,22 @@
 # https://github.com/ansible/ansible-modules-core/blob/devel/database/postgresql/postgresql_db.py
 
 import copy
-import functools
-from typing import Any, Callable, Dict, List, Optional, Pattern, Sequence, Tuple
+from typing import Any, Dict
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.io_patricecongo.spire.plugins.module_utils import (
     logging,
-    spire_agent_info_cmd,
 )
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.ansible_module_cmd import RunCommand
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.ansible_module_cmd import (
+    RunCommand,
+)
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_agent_info_cmd import (
+    AgentDirs,
     AgentStateSnapshot,
     SpireAgentInfo,
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_server_entry_cmd import (
     Params,
-    RegistrationEntry,
-    SpireServerEntryShowOutcome,
 )
 
 ANSIBLE_METADATA = {
@@ -79,6 +78,18 @@ options:
             - e.g. /opt/spire
         type: str
         required: True
+    spire_agent_log_dir:
+        description:
+            - the directory that hold the agent logs
+            - e.g. /var/log
+        type: str
+        required: True
+    spire_agent_service_dir:
+        description:
+            - directory which holds the agent systemd service config
+            - e.g. /etc/systemd/system
+        type: str
+        required: True
     spire_agent_socket_path:
         description:
             - path to socket file use to communicate with the agent
@@ -108,7 +119,9 @@ EXAMPLES = '''
     io_patricecongo.spire_agent_info:
         spire_agent_config_dir: /etc/spire-agent
         spire_agent_data_dir: /var/lib/spire/agent/data
-        spire_agent_install_dir": /opt/spire-agent
+        spire_agent_install_dir: /opt/spire-agent
+        spire_agent_log_dir: /var/log/
+        spire_agent_service_dir: /etc/systemd/system
         spire_agent_socket_path": /tmp/agent.sock
         spire_agent_service_name: spire_agent
         spire_agent_service_scope": system
@@ -220,12 +233,14 @@ spire_agent_service_enabled_issue:
 
 def _module_args() -> Dict[str, Dict[str,Any]]:
     module_args = dict(
-        spire_agent_config_dir = dict(type="str", required=True, _default="/etc/spire-agent"),
-        spire_agent_data_dir = dict(type="str", required=True, _default="/var/lib/spire-agent/data/agent"),
-        spire_agent_install_dir = dict(type="str", required=True, _default="/opt/spire"),
+        spire_agent_config_dir = dict(type="str", required=True),
+        spire_agent_data_dir = dict(type="str", required=True),
+        spire_agent_install_dir = dict(type="str", required=True),
+        spire_agent_log_dir = dict(type="str", required=True),
+        spire_agent_service_dir = dict(type="str", required=True),
         spire_agent_socket_path = dict(type="str", required=False, default="/tmp/agent.sock"),
         spire_agent_service_name = dict(type="str", required=False, default="spire_agent"),
-        spire_agent_service_scope = dict(type="str", required=True, choices=["system", "user"], __default="system"),
+        spire_agent_service_scope = dict(type="str", required=True, choices=["system", "user"]),
     )
     return module_args
 
@@ -244,15 +259,21 @@ def run_module() -> None:
     func_log = logging.CachingLogger(module.log)
 
     try:
-        agent_info: SpireAgentInfo = SpireAgentInfo(
-            run_command = func_run_command,
-            log_func = func_log,
+        dirs: AgentDirs = AgentDirs(
             config_dir = module.params["spire_agent_config_dir"],
             data_dir = module.params["spire_agent_data_dir"],
             install_dir = module.params["spire_agent_install_dir"],
+            log_dir=module.params["spire_agent_log_dir"],
+            service_dir=module.params["spire_agent_service_dir"],
+            service_name=module.params["spire_agent_service_name"],
+        )
+        agent_info: SpireAgentInfo = SpireAgentInfo(
+            run_command = func_run_command,
+            log_func = func_log,
+            dirs=dirs,
             socket_path = module.params["spire_agent_socket_path"],
-            service_name = module.params["spire_agent_service_name"],
             service_scope = module.params["spire_agent_service_scope"],
+            expected_version=None # TODO not needed remove me
         )
         state_snapshot: AgentStateSnapshot = AgentStateSnapshot(agent_info)
         result = {

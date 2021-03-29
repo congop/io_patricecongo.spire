@@ -16,12 +16,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
-from datetime import time
 from typing import Any, Dict, List, NamedTuple
 
 import _pytest.monkeypatch as mp
 from ansible.module_utils.basic import AnsibleModule
-import dateutil, datetime, pytz
+import datetime
 from dateutil import tz
 
 # import set_module_args

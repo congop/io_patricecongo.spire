@@ -28,7 +28,9 @@ import time
 from typing import Any, Callable, Dict, List, cast
 
 from ansible_collections.io_patricecongo.spire.plugins.module_utils import join_token, systemd
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.dirs import SpireCmptDirs
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.file_stat import FileModes
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_agent_info_cmd import AgentDirs
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_server_info_cmd import (
     ServerDirs
 )
@@ -164,6 +166,25 @@ class SpireComponentRunner(ABC):
     def url_dist_tar_gz(self, spire_version) -> str:
         return self.__dist_download_dirs.url_dist_tar_gz(spire_version)
 
+    @abstractmethod
+    def get_component_files(self) -> SpireCmptDirs:
+        pass
+
+    @abstractmethod
+    def get_run_command(self) -> systemd.CmdExecCallable:
+        pass
+
+    def fix_files_modes(self, file_modes: FileModes) -> None:
+        files: SpireCmptDirs = self.get_component_files()
+        chmod(
+            run_command=self.get_run_command(),
+            mode_to_files={
+                file_modes.mode_dir: files.expected_dirs(),
+                file_modes.mode_file_not_exe: files.expected_files_not_exec(),
+                file_modes.mode_file_exe: files.expected_files_exec()
+            }
+        )
+
 
 
 def subprocess_run_command(cmd_parts: Any) -> CmdExecOutcome:
@@ -226,7 +247,7 @@ class ServerRunner(SpireComponentRunner, CheckServer):
         self.__run_command: systemd.CmdExecCallable = run_command
         self.extra_cleanup_tasks: List[Callable[[], None]] = []
 
-    def get_component_files(self) -> ServerDirs:
+    def get_component_files(self) -> SpireCmptDirs:
         return ServerDirs(
             config_dir=self.dir_config,
             data_dir=self.dir_data,
@@ -236,16 +257,19 @@ class ServerRunner(SpireComponentRunner, CheckServer):
             service_name=self.service.service_name
         )
 
-    def fix_files_modes(self, file_modes: FileModes) -> None:
-        files = self.get_component_files()
-        chmod(
-            run_command=self.__run_command,
-            mode_to_files={
-                file_modes.mode_dir: files.expected_dirs(),
-                file_modes.mode_file_not_exe: files.expected_files_not_exec(),
-                file_modes.mode_file_exe: files.expected_files_exec()
-            }
-        )
+    def get_run_command(self) -> systemd.CmdExecCallable:
+        return self.__run_command
+
+    # def fix_files_modes(self, file_modes: FileModes) -> None:
+    #     files = self.get_component_files()
+    #     chmod(
+    #         run_command=self.__run_command,
+    #         mode_to_files={
+    #             file_modes.mode_dir: files.expected_dirs(),
+    #             file_modes.mode_file_not_exe: files.expected_files_not_exec(),
+    #             file_modes.mode_file_exe: files.expected_files_exec()
+    #         }
+    #     )
 
     def path_server_config(self) -> str:
         return os.path.join(self.dir_config, "server.conf")
@@ -474,6 +498,8 @@ class AgentRunner(SpireComponentRunner, CheckAgent):
         self.spire_agent_join_token: str = None
         self.server_bundle: str = None
 
+        self.__run_command:systemd.CmdExecCallable = run_command
+
         self.service = systemd.SpireComponentService(
                                 service_name, run_command, scope)
         CheckAgent.__init__(
@@ -498,6 +524,19 @@ class AgentRunner(SpireComponentRunner, CheckAgent):
         os.makedirs(self.dir_config, exist_ok=True, mode=0o770)
         os.makedirs(self.dir_log, exist_ok=True, mode=0o770)
 
+    def get_component_files(self) -> SpireCmptDirs:
+        return AgentDirs(
+            config_dir=self.dir_config,
+            data_dir=self.dir_data,
+            install_dir=self.dir_install,
+            log_dir=self.dir_log,
+            service_dir=self.service.install_dir,
+            service_name=self.service.service_name
+        )
+
+    def get_run_command(self) -> systemd.CmdExecCallable:
+        return self.__run_command
+
     def __install_agent(self, spire_version: str) -> None:
         template_config_str = \
             """\
@@ -507,11 +546,11 @@ class AgentRunner(SpireComponentRunner, CheckAgent):
                 log_file  = "$dir_log/spire-agent.log"
                 trust_domain = "$trust_domain"
                 server_address = "$server_address"
-                server_port = $server_port
+                server_port = "$server_port"
                 socket_path ="$socket_path"
                 insecure_bootstrap = false
                 trust_bundle_path = "$dir_config/trust_bundle.pem"
-                join_token = "$spire_agent_join_token"
+                join_token = "$$spire_agent_join_token"
             }
 
             plugins {

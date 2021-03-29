@@ -75,9 +75,9 @@
         spire_agent_log_level: "DEBUG"
         spire_agent_trust_domain: "example.org"
         spire_agent_socket_path: "/tmp/agent.sock"
-        spire_agent_log_dir: spire_agent_log_dir
-        spire_agent_service_params_name: "spire_agent"
-        spire_agent_service_params_scope: "system"
+        spire_agent_log_dir: "/var/log/spire"
+        spire_agent_service_name: "spire_agent"
+        spire_agent_service_scope: "system"
         spire_agent_healthiness_probe_timeout_seconds: 15
 
         spire_download_url: "file://{{ lookup('env','MOLECULE_PROJECT_DIRECTORY') }}/molecule/resources/docker-spire-server/.download/spire-0.10.1-linux-x86_64-glibc.tar.gz"

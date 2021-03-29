@@ -17,7 +17,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
 import enum
-from re import S
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union
 
 from .diffs import DiffABC
@@ -192,6 +191,14 @@ class StateOfAgent:
             data["actual_substate_service_status"] = self.substate_service_status_name()
         return data
 
+    def ansible_diff_header_str(self, resource: str) -> str:
+        state = self.state.name
+        sstate_srv_inst = self.substate_service_installation_name()
+        sstate_srv_status = self.substate_service_status_name()
+        sstate_reg = self.substate_agent_registered_name()
+        header_str = f"{resource} ({state} // {sstate_srv_inst} // {sstate_srv_status}) // {sstate_reg}"
+        return header_str
+
     @staticmethod
     def from_task_args(task_args: Dict[str, Any]) -> "StateOfAgent":
         args_state = task_args.get("state")
@@ -347,6 +354,22 @@ class StateOfServerDiff(DiffABC):
         super().__init__(no_diff=no_diff, resource_id="state-of-spire-server")
         self.actual: StateOfServer = actual
         self.expected: StateOfServer = expected
+
+    def ansible_diff_header_before_after(self) -> Dict[str, str]:
+        return {
+             "after_header": self.actual.ansible_diff_header_str(self.resource_id),
+             "before_header": self.expected.ansible_diff_header_str(self.resource_id)
+        }
+
+class StateOfAgentDiff(DiffABC):
+
+    def __init__(
+        self, actual: StateOfAgent, expected: StateOfAgent
+    ) -> None:
+        no_diff: bool = not actual.need_change(expected=expected)
+        super().__init__(no_diff=no_diff, resource_id="state-of-spire-agent")
+        self.actual: StateOfAgent = actual
+        self.expected: StateOfAgent = expected
 
     def ansible_diff_header_before_after(self) -> Dict[str, str]:
         return {

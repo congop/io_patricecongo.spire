@@ -11,6 +11,7 @@
     "**/.git/subtree-cache/**": true,
     "**/node_modules/*/**": true,
     "**/.mypy_cache/*/**": true,
+    "**/.act/*/**": true,
   },
   "python.pythonPath": ".venv_2_10/bin/python",
   "python.testing.pytestArgs": [
@@ -42,5 +43,7 @@
   "python.analysis.extraPaths": [
     "__fake_src"
   ],
+  "python.analysis.autoSearchPaths": false,
+  "python.analysis.diagnosticMode": "workspace",
 
 }

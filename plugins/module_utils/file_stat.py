@@ -18,12 +18,16 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
 from abc import ABC, abstractmethod
 import enum
-import os, stat, pwd, grp, io
+import grp
+import io
+import os
+import pwd
+import stat
 from typing import Any, Callable, Dict, List, NamedTuple, Set, Tuple, cast
 
+from . import module_outcome, randoms, strings
 from .diffs import DiffABC
-from . import randoms, module_outcome, strings
-import copy
+
 
 class RemoteFileAccessFacade(ABC):
     @abstractmethod
@@ -576,8 +580,6 @@ def get_file_statt_differ(
     file_stats_expected: FileStats
 
 ) -> Callable[[str], FileStatDiff]:
-    from pathlib import PurePath
-    import os
     #system_dirs_pp: Set[PurePath] = {PurePath(p) for p in system_dirs}
     #user_system_dirs_pp: Set[PurePath] =  {PurePath(p) for p in user_system_dirs}
 

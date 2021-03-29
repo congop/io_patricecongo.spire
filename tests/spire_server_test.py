@@ -53,10 +53,10 @@ import pytest
 from .spire_test_runner import ServerRunner, subprocess_run_command
 from . import test_data
 
-# cmd:chmod u+x /home/patdev/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/
-#       /home/patdev/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/AnsiballZ_get_url.py
+# cmd:chmod u+x /home/spire/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/
+#       /home/spire/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/AnsiballZ_get_url.py
 # cmd:/usr/bin/python
-#       /home/patdev/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/AnsiballZ_get_url.py
+#       /home/spire/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/AnsiballZ_get_url.py
 # regex_get_url_= re.compile("/usr/bin/python\s+.*/AnsiballZ_get_url.py$")
 _regex_get_url_ = re.compile(r"/usr/bin/python\s+(.*/AnsiballZ_get_url.py)$")
 _regex_command_ = re.compile(r"/usr/bin/python\s+(.*/AnsiballZ_command.py)$")

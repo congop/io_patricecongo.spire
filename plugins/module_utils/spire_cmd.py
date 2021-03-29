@@ -16,11 +16,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
-import re
 import time
 from typing import Any, Callable, List, Optional, Pattern, Tuple
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.systemd import Scope
 
 from . import logging
 from .spire_typing import BoolResultWithIssue, CmdExecCallable, CmdExecOutcome

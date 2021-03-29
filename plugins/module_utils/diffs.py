@@ -20,7 +20,7 @@ from abc import(
     ABC,
     abstractmethod
 )
-from typing import Callable, Dict, Iterable, List, Mapping
+from typing import Callable, Dict, Iterable, List
 import itertools
 
 from . import strings

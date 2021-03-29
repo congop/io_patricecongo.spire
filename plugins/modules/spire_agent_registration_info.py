@@ -27,7 +27,6 @@ from typing import Any, Dict, List
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.io_patricecongo.spire.plugins.module_utils import (
     logging,
-    spire_agent_registration_info_cmd,
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_agent_registration_info_cmd import (
     AgentRegistrationEntry,

@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 from typing import Tuple
+import yaml
 
 
 def get_env_var(key: str) -> str:
@@ -55,8 +56,6 @@ def modelcule_debug() -> bool:
 
 
 def get_collection_info() -> Tuple[str,str,str]:
-      import yaml
-      from yaml import reader
       pjt_dir = get_project_directory()
       galaxy_yml = os.path.join(pjt_dir, "galaxy.yml")
       if not os.path.exists(galaxy_yml):
@@ -101,8 +100,8 @@ def anible_galaxy_install_to_collections_path(collections_path: str, tar_gz_dist
             raise RuntimeError(msg)
       if modelcule_debug():
             print(f"""Ansible-Galaxy collection install succeeded: {args}
-                  stdout: {p.stdout}
-                  stderr: {p.stderr}
+                  stdout: {str(p.stdout)}
+                  stderr: {str(p.stderr)}
                   """
             )
 

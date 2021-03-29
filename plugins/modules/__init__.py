@@ -17,10 +17,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
 import os
-import pkgutil
-
-import pkg_resources
-
 
 def read_version() -> str:
     package_dir = os.path.dirname(os.path.realpath(__file__))  # .rsplit(os.sep, 3)[0]

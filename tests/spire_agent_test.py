@@ -39,6 +39,7 @@ from ansible.vars.manager import VariableManager
 # because the import of an action triggers some setup/loading of ansible-collection stuff
 from ansible_collections.io_patricecongo.spire.plugins.action import spire_agent
 from ansible_collections.io_patricecongo.spire.plugins.module_utils import systemd
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.file_stat import FileModes
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing import (
     State,
     StateOfAgent,
@@ -51,10 +52,10 @@ import pytest
 from .spire_test_runner import AgentRunner, ServerRunner, subprocess_run_command
 from . import test_data
 
-# cmd:chmod u+x /home/patdev/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/
-#       /home/patdev/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/AnsiballZ_get_url.py
+# cmd:chmod u+x /home/spire/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/
+#       /home/spire/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/AnsiballZ_get_url.py
 # cmd:/usr/bin/python
-#       /home/patdev/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/AnsiballZ_get_url.py
+#       /home/spire/.ansible/tmp/ansible-tmp-1599045417.1758895-17492-105838489853076/AnsiballZ_get_url.py
 # regex_get_url_= re.compile("/usr/bin/python\s+.*/AnsiballZ_get_url.py$")
 _regex_get_url_ = re.compile(r"/usr/bin/python\s+(.*/AnsiballZ_get_url.py)$")
 _regex_command_ = re.compile(r"/usr/bin/python\s+(.*/AnsiballZ_command.py)$")
@@ -65,7 +66,7 @@ class SpireRunners(NamedTuple):
     agent: AgentRunner
 
     def to_agent_initial_state(
-        self, state: StateOfAgent, spire_version: str
+        self, state: StateOfAgent, spire_version: str, file_modes: FileModes
     ) -> None:
         def reject_unsupported_service_installation_stated() -> None:
             supported_states = [SubStateServiceInstallation.enabled]
@@ -84,6 +85,7 @@ class SpireRunners(NamedTuple):
         )
         self.agent.server_bundle = self.server.get_server_bundle()
         self.agent.install(spire_version)
+        self.agent.fix_files_modes(file_modes)
         reject_unsupported_service_installation_stated()
         srv_status = state.substate_service_status
         if SubStateServiceStatus.stopped == srv_status:
@@ -317,7 +319,12 @@ def test_pire_agent(
 
     server_runner.install_and_start(
         spire_version=test_data.spire_version, must_be_ready=True)
-    spire_runners.to_agent_initial_state(initial_state, test_data.spire_version)
+    file_modes = FileModes(
+        mode_dir="u=xrw,g=xrw,o=",
+        mode_file_not_exe="u=rw,g=rw,o=",
+        mode_file_exe="u=xrw,g=xr,o=xr")
+    #spire_runners.to_server_initial_state(initial_state, initial_version, file_modes)
+    spire_runners.to_agent_initial_state(initial_state, test_data.spire_version, file_modes)
     inventory, data_loader, var_manager = give_inventory_and_data_loader()
 
     play: Play = Play.load({"hosts": "spire_agent"},
@@ -349,16 +356,17 @@ def test_pire_agent(
             "spire_agent_service_dir": agent_runner.service.install_dir,
             "spire_agent_log_dir": agent_runner.dir_log,
             "spire_agent_install_file_owner": None,
-            "spire_agent_install_file_mode": "u=rw,g=rw",
-            "spire_agent_install_file_mode_exe": "u=xrw,g=xr,o=xr",
+            "spire_agent_install_dir_mode": file_modes.mode_dir,
+            "spire_agent_install_file_mode": file_modes.mode_file_not_exe, # "u=rw,g=rw",
+            "spire_agent_install_file_mode_exe": file_modes.mode_file_exe, # "u=xrw,g=xr,o=xr",
             "spire_agent_version": test_data.spire_version,
             "spire_agent_additional_spiffe_id": agent_runner.additional_spiffe_id,
             "spire_agent_join_token_ttl": agent_runner.join_token_ttl,
             "spire_agent_log_level": "DEBUG",
             "spire_agent_trust_domain": server_runner.trust_domain,
             "spire_agent_socket_path":  agent_runner.socket_path,
-            "spire_agent_service_params_name": agent_runner.service.service_name,
-            "spire_agent_service_params_scope": "user",
+            "spire_agent_service_name": agent_runner.service.service_name,
+            "spire_agent_service_scope": "user",
             "spire_agent_healthiness_probe_timeout_seconds": 5,
             "spire_download_url": server_runner.url_dist_tar_gz(test_data.spire_version),
         }

@@ -1,0 +1,17 @@
+{
+  "include": [
+    "__fake_src",
+    "tests",
+    "molecule"
+  ],
+
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "plugins/**"
+  ],
+
+  "reportMissingImports": true,
+  "reportUnusedImport": true
+
+}

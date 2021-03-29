@@ -18,7 +18,6 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
 from typing import Any, Callable, Dict, Tuple
 from yamllint import linter
-import yaml
 import pytest
 from yamllint.config import YamlLintConfig
 from ansible_collections.io_patricecongo.spire.plugins.modules import(
@@ -36,8 +35,6 @@ from ansible.parsing import(
 from types import (
     FunctionType, ModuleType,
 )
-
-from importlib import import_module
 
 def get_module_args(mod: ModuleType) -> Dict[str, Dict[str,Any]]:
     _module_args_func: Callable[[], Dict[str, Dict[str,Any]]]  = getattr(mod,"_module_args")

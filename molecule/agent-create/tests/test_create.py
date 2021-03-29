@@ -35,9 +35,13 @@ ansible_runner = testinfra.utils.ansible_runner.AnsibleRunner(
 testinfra_hosts = ansible_runner.get_hosts("spire_agent")
 
 from ansible_collections.io_patricecongo.spire.plugins.module_utils import (
-    spire_agent_info_cmd,
     spire_server_entry_cmd,
 )
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_agent_info_cmd import (
+    AgentDirs,
+    SpireAgentInfo,
+)
+
 import test_data
 
 
@@ -56,17 +60,23 @@ def test_agent_created(host:Host, agent_data_dir_local:str) -> None:
     host_funcs = HostFuncsAdapter(host)
 
     print(f"Test Infra Host: {host}")
+    # copying data to local machine because certificates requires
+    # files to be local
     host_funcs.docker_copy_agent_svid_der(agent_data_dir_local)
-    spire_agent_install_dir="/opt/spire-agent"
-    agent_info = spire_agent_info_cmd.SpireAgentInfo(
+    dirs = AgentDirs(
+        config_dir="/etc/spire-agent",
+        data_dir=agent_data_dir_local,
+        install_dir="/opt/spire-agent",
+        service_name="spire_agent",
+        log_dir="/var/log/spire",
+        service_dir="/etc/systemd/system",
+    )
+    agent_info = SpireAgentInfo(
                         run_command=host_funcs.run_command,
                         log_func=host_funcs.no_log,
-                        config_dir="/etc/spire-agent",
-                        data_dir=agent_data_dir_local,
-                        install_dir=spire_agent_install_dir,
-                        service_name="spire_agent",
-                        service_scope=None,
-                        socket_path=None,
+                        dirs=dirs,
+                        service_scope="system",
+                        socket_path="/tmp/agent.sock",
                         expected_version=test_data.spire_version,
                         file_exists_func=host_funcs.file_exists
     )
@@ -91,8 +101,7 @@ def test_agent_created(host:Host, agent_data_dir_local:str) -> None:
 
     spire_agent_service_name = "spire_agent"
     spire_agent_service_filename = f"{spire_agent_service_name}.service"
-    spire_agent_cmd_path = os.path.join(spire_agent_install_dir, "bin", "spire-agent")
-    agent_health_res: CommandResult = host.run("%s %s", spire_agent_cmd_path, "healthcheck")
+    agent_health_res: CommandResult = host.run("%s %s", dirs.path_executable, "healthcheck")
     agent_srv_running_res: CommandResult = host.run("systemctl is-active %s", spire_agent_service_filename)
     agent_srv_enabled_res: CommandResult = host.run("systemctl is-enabled %s", spire_agent_service_filename)
 

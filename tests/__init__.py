@@ -96,7 +96,6 @@ try:
     # environment does not satisfy the collection structure.
     from ansible.utils.collection_loader._collection_finder import (
         _AnsibleCollectionFinder,
-        _AnsibleCollectionLoader,
     )
 
     original_find_module = _AnsibleCollectionFinder.find_module

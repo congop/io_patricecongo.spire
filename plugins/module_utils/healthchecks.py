@@ -16,16 +16,15 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
-from abc import ABC, abstractmethod
+from abc import ABC
 import re
 import time
-from typing import Callable, List, Pattern
+from typing import List, Pattern
 
-from ansible_collections.io_patricecongo.spire.plugins.module_utils import logging, spire_cmd
+from ansible_collections.io_patricecongo.spire.plugins.module_utils import spire_cmd
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing import (
     BoolResultWithIssue,
     CmdExecCallable,
-    CmdExecOutcome,
 )
 
 

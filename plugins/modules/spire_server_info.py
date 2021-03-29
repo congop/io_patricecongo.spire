@@ -22,9 +22,7 @@
 
 # https://github.com/ansible/ansible-modules-core/blob/devel/database/postgresql/postgresql_db.py
 
-import copy
-import functools
-from typing import Any, Callable, Dict, List, Optional, Pattern, Sequence, Tuple
+from typing import Any, Dict
 
 from ansible.module_utils.basic import AnsibleModule
 
@@ -36,9 +34,6 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_server
     ServerStateSnapshot,
     SpireServerInfo,
     ServerDirs
-)
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_server_entry_cmd import (
-    Params,
 )
 
 ANSIBLE_METADATA = {

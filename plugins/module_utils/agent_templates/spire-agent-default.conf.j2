@@ -6,11 +6,11 @@ agent {
     server_port = "{{ spire_server_port }}"
     socket_path ="{{ spire_agent_socket_path }}"
     log_file="{{ spire_agent_log_dir }}/spire-agent.log"
-    # Insecure bootstrap is NOT appropriate for production use but is ok for 
+    # Insecure bootstrap is NOT appropriate for production use but is ok for
     # simple testing/evaluation purposes.
     insecure_bootstrap = false
     trust_bundle_path = "{{ spire_agent_config_dir }}/trust_bundle.pem"
-    join_token = "${spire_agent_join_token}"
+    join_token = "$spire_agent_join_token"
 }
 
 plugins {

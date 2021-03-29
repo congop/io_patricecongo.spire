@@ -19,90 +19,58 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
 
 # Make coding more python3-ish, this is required for contributions to Ansible
-from datetime import datetime, timezone
-import itertools
-import os, shutil
-from typing import Any, Callable, Dict, Iterable, List, Mapping, NamedTuple, Tuple, Union, cast
+import shutil
+from typing import Any, Callable, Dict, List, Union, cast
 
-from ansible import constants
-from ansible.playbook import task as module_task
-from ansible.plugins.action import ActionBase
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.file_stat import (
-    ExpectedStatsByMode, FileModes, FileStat, FileStatDiff,
-    FileStats, FileStatsDiff
-)
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.diffs import DiffABC, DigestDiff, StrResourceDiff, VersionDiff
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.users import User
-# from module_utils.spire_action_base import assert_task_did_not_failed
-
-try:
-    from ansible.modules import get_url
-except (ModuleNotFoundError, ImportError):
-    # for ansible 2.9.x
-    # from ansible.modules.net_tools.basics import get_url
-    import importlib
-    get_url = importlib.import_module("ansible.modules.net_tools.basics.get_url")
-
-import tempfile
-from urllib.parse import urlparse
-
-from ansible.inventory.host import Host
-from ansible.inventory.manager import InventoryManager
 from ansible.parsing import dataloader
-from ansible.playbook.play import Play
 from ansible.playbook.play_context import PlayContext
 from ansible.playbook.task import Task
 from ansible.plugins import loader as plugins_loader
 from ansible.plugins.connection.__init__ import ConnectionBase
-from ansible.plugins.connection.local import Connection
 from ansible.template import Templar
-from ansible.vars.manager import VariableManager
-from ansible_collections.io_patricecongo.spire.plugins.module_utils import join_token, logging, strings
+from ansible_collections.io_patricecongo.spire.plugins.module_utils import logging
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.diffs import (
+    DigestDiff,
+    StrResourceDiff,
+    VersionDiff,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.digests import (
+    digest_hcl_file,
+    digest_ini_file,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.file_stat import (
+    ExpectedStatsByMode,
+    FileModes,
+    FileStats,
+    FileStatsDiff,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_outcome import (
+    assert_task_did_not_failed,
+)
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.server_templates.resources import (
     ServerTemplates,
 )
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing import (
-    State,
-    StateOfServer, StateOfServerDiff,
-    SubStateServiceInstallation,
-    SubStateServiceStatus,
-)
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_outcome import(
-    assert_task_did_not_failed
-)
-
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_action_base import(
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_action_base import (
+    DiffSpireCmptActualExpected,
     SpireActionBase,
     SpireTemplateRes,
     make_local_temp_work_dir,
 )
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.net_utils import(
-    is_localhost,
-    url_filename,
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_server_info_cmd import (
+    ServerDirs,
 )
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.tar_utils import(
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing import (
+    State,
+    StateOfServer,
+    StateOfServerDiff,
+    SubStateServiceInstallation,
+    SubStateServiceStatus,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.systemd import Scope
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.tar_utils import (
     extract_tar_member,
 )
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.digests import(
-    digest_hcl_file,
-    digest_ini_file
-)
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.systemd import(
-    Scope
-)
-
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_server_info_cmd import(
-    ServerDirs
-)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.users import User
 
 
 class ServerInfoResultAdapter:
@@ -168,114 +136,6 @@ class ServerInfoResultAdapter:
                 }
 
 
-class DiffSpireCmptActualExpected:
-    # if system dir ignore actual,expected = exists, None
-    #   - may be you want to avoid changing their attrs
-    #   - though creating them is legitimate
-    #   example: /va/log , /etc/system/systemd, /usr/local/bin
-    #         at user-home:  ~/.local/bin/, <home-systemd>, ~/.config/systemd/user/
-    # Never acccept / as directory
-    def __init__(
-        self,
-        file_attrs: List[FileStatDiff],
-        file_contents: List[DigestDiff],
-        exe_versions: List[VersionDiff],
-        state_diff: StateOfServerDiff,
-        scope_diff: StrResourceDiff
-    ) -> None:
-        self.no_diff: bool = DiffABC.no_diff_from_iterables(
-            [state_diff, scope_diff], exe_versions,
-            file_attrs, file_contents
-        )
-        self.file_attrs: List[FileStatDiff] = file_attrs
-        self.file_contents: List[DigestDiff] = file_contents
-        self.exe_versions: List[VersionDiff] = exe_versions
-        self.state_diff: StateOfServerDiff = state_diff
-        self.scope_diff: StrResourceDiff = scope_diff
-
-    def to_ansible_diff_header_before_after_list(self) -> List[Dict[str, Any]]:
-        h_file_attrs = DiffABC.to_ansible_diff_header_before_after_list(
-            diffs=self.file_attrs
-        )
-        h_file_contents = DiffABC.to_ansible_diff_header_before_after_list(
-            diffs=self.file_contents
-        )
-        h_exe_versions = DiffABC.to_ansible_diff_header_before_after_list(
-            diffs=self.exe_versions
-        )
-        h_state = DiffABC.to_ansible_diff_header_before_after_list(
-            diffs=[self.state_diff, self.scope_diff]
-        )
-        return [
-                *h_file_attrs,
-                *h_file_contents,
-                *h_exe_versions,
-                *h_state
-        ]
-
-
-    def ansible_diff_outcome_part(
-        self, diff_activated: bool
-    ) -> Dict[str, List[Dict[str,str]]]:
-
-        if not diff_activated:
-            return {}
-        if self.no_diff:
-            return {"diff":[]}
-        outcome_part = {
-            "diff": self.to_ansible_diff_header_before_after_list()
-        }
-        return outcome_part
-
-    def ansible_failed_outcome_part_given_no_diff_expected(self) -> Dict[str, Any]:
-        if self.no_diff:
-            return {}
-        before_afters = self.to_ansible_diff_header_before_after_list()
-        msg = f"no diff expected but got: {before_afters}"
-        return {
-            "failed": True,
-            "msg": msg
-        }
-
-    def need_change(self) -> bool:
-        return not self.no_diff
-
-    def need_binary_change(self, bin_file: str) -> bool:
-        if self.no_diff:
-            return False
-        diff_src = itertools.chain(self.file_contents, self.exe_versions)
-        no_diff = all(
-            map(
-                DiffABC.no_diff,
-                filter(DiffABC.predicate_diffing_resource(bin_file), diff_src)
-            )
-        )
-        return not no_diff
-
-    def dirs_needing_change(self, dirs: List[str])->List[str]:
-        # dirs_to_change = list(map(
-        #         DiffABC.get_resource_id,
-        #         filter(DiffABC.predicate_diffing_any_of(dirs), self.file_attrs)
-        #     ))
-        dirs_to_change = [
-            d.resource_id
-            for d in self.file_attrs
-            if d.resource_id in dirs
-        ]
-        return dirs_to_change
-
-    def need_content_change(self, file:str) -> bool:
-        need_change: bool = DiffABC.need_change(
-            file=file, diffs=self.file_contents, diffs_label="file_contents"
-        )
-        return need_change
-
-    def need_attrs_change(self, file:str) -> bool:
-        need_change: bool = DiffABC.need_change(
-            file=file, diffs=self.file_attrs, diffs_label="file_attrs"
-        )
-        return need_change
-
 class ServerActionData:
     def __init__(self) -> None:
         self.local_temp_work_dir: str = None
@@ -285,7 +145,7 @@ class ServerActionData:
         self.spire_server_info: ServerInfoResultAdapter = ServerInfoResultAdapter({})
         self.downloaded_dist_path: str = None
         self.expected_state: StateOfServer = None
-        self.server_dirs: ServerDirs = None
+        self.dirs: ServerDirs = None
         self.expected_file_modes: FileModes = None
         self.expected_file_modes_effective: FileModes = None
         self.server_service_return: Dict[str, Any] = None
@@ -294,43 +154,18 @@ class ServerActionData:
         self.expected_file_stats: FileStats = None
         self.expected_user: User = None
 
-    def need_change(self) -> bool:
-        actual_state = self.spire_server_info.to_detected_state()
-        _need_changer: bool = actual_state.need_change(self.expected_state) \
-            or self.need_service_change() \
-            or self.need_binary_change()
-        return _need_changer
-
     def to_ansible_return_data(self) -> Dict[str, Any]:
         actual_state_result_data = self.spire_server_info.to_ansible_return_data()
         return {**actual_state_result_data}
-
-    def to_ansible_retun_data_failed_entry(self) -> Dict[str, bool]:
-        if not self.need_change():
-            return {}
-        return {"failed": True}
-
-    def need_service_change(self) -> bool:
-        # todo f(dir-structure-changed, config-files-changed, service_scope-changed)
-        expected: ExpectedConfig = self.expected_config
-        actual: ServerInfoResultAdapter = self.spire_server_info
-        return bool(
-            expected.config_file_digest != actual.hexdigest_config_file
-            or expected.service_file_disgest != actual.hexdigest_service_file
-            or expected.service_scope != actual.spire_server_service_scope
-        )
-
-    def need_binary_change(self) -> bool:
-        return self.expected_config.spire_version != self.spire_server_info.spire_server_version
 
     def diff(self) -> DiffSpireCmptActualExpected:
         # TODO move resource(uri) into diff (when executable has moved? how to model that)
         #info = self.spire_server_info
         expected: ExpectedConfig = self.expected_config
         actual: ServerInfoResultAdapter = self.spire_server_info
-        server_dirs: ServerDirs = self.server_dirs
+        dirs: ServerDirs = self.dirs
         file_stats_diff = FileStatsDiff.for_files(
-            files=server_dirs.expected_dirs_and_files(),
+            files=dirs.expected_dirs_and_files(),
             file_stats_actual=actual.file_stats,
             file_stats_expected=self.expected_file_stats,
             system_dirs={
@@ -344,7 +179,7 @@ class ServerActionData:
         # file_stats_diff.
         exe_versions = [
             VersionDiff(
-                resource_id=server_dirs.path_executable,
+                resource_id=dirs.path_executable,
                 version_actual=actual.spire_server_version,
                 version_expected=expected.spire_version
             )
@@ -358,7 +193,7 @@ class ServerActionData:
         # ==>Update not covered
         # TODO: do real diff
         #       env is bash file or really just  ini?
-        env_file = server_dirs.path_env_file
+        env_file = dirs.path_env_file
         env_file_digest_diff = DigestDiff(
             file=env_file,
             digest_actual=f"exists={actual.file_stats.exists(env_file)}",
@@ -367,12 +202,12 @@ class ServerActionData:
 
         file_contents: List[DigestDiff] = [
             DigestDiff(
-                file=server_dirs.path_conf_file,
+                file=dirs.path_conf_file,
                 digest_actual=actual.hexdigest_config_file,
                 digest_expected=expected.config_file_digest
             ),
             DigestDiff(
-                file=server_dirs.path_service_file,
+                file=dirs.path_service_file,
                 digest_actual=actual.hexdigest_service_file,
                 digest_expected=expected.service_file_disgest
             ),
@@ -435,10 +270,6 @@ class ExpectedConfig:
             self.config_file_digest = digest_hcl_file(self.conf_file)
 
 
-# https://gist.github.com/ju2wheels/408e2d34c788e417832c756320d05fb5
-# use_vars = task_vars.get('ansible_delegated_vars')[self._task.delegate_to]
-# /home/patdev/software/ansible/ansible-modules-spire/.venv/lib/python3.6/site-packages/ansible/plugins/action/__init__.py
-#  @ 155  def _configure_module
 class ActionModule(SpireActionBase):
 
     def __init__(
@@ -454,13 +285,13 @@ class ActionModule(SpireActionBase):
         self.action_data: ServerActionData = ServerActionData()
         self.diff_actual_expected: DiffSpireCmptActualExpected = None
 
-    def _ensure_spire_server_dir_structure_and_binary_available(
+    def _ensure_dir_structure_and_binary_available(
             self, task_vars: Dict[str, Any] = None
     ) -> None:
         file_modes = self.action_data.expected_file_modes_effective
         downloaded_spire_dist_path = self.action_data.downloaded_dist_path
-        server_dirs: ServerDirs = self.action_data.server_dirs
-        expected_dirs = server_dirs.expected_dirs()
+        dirs: ServerDirs = self.action_data.dirs
+        expected_dirs = dirs.expected_dirs()
         dirs_needing_change: List[str] = self.diff_actual_expected.dirs_needing_change(expected_dirs)
         self._create_remote_dirs(
             task_vars=task_vars,
@@ -478,7 +309,7 @@ class ActionModule(SpireActionBase):
         self._copy_from_controller_to_target(
             copy_task_label=f"spire-server({spire_server_binary_extracted_path})",
             src=spire_server_binary_extracted_path,
-            dest=server_dirs.install_dir_bin,
+            dest=dirs.install_dir_bin,
             sec_attributes={
                 "owner": self.get_install_file_owner(),
                 "mode": file_modes.mode_file_exe
@@ -490,11 +321,11 @@ class ActionModule(SpireActionBase):
     def _get_spire_server_service_name(self) -> str:
         return cast(str, self._task.args.get("spire_server_service_name"))
 
-    def _get_spire_server_service_scope_str(self) -> str:
+    def _get_service_scope_str(self) -> str:
         return cast(str, self._task.args.get("spire_server_service_scope"))
 
     def _get_expected_service_scope(self) -> Scope:
-         scope_str = self._get_spire_server_service_scope_str()
+         scope_str = self._get_service_scope_str()
          if scope_str:
             return Scope.by_name(scope_str)
          return Scope.scope_system
@@ -552,10 +383,10 @@ class ActionModule(SpireActionBase):
         file_modes_effective = expected_stats_by_mode.effective_modes(file_modes)
         action_data.expected_file_modes_effective = file_modes_effective
         action_data.expected_stats_by_mode = expected_stats_by_mode
-        server_dirs = action_data.server_dirs
+        dirs = action_data.dirs
         action_data.expected_file_stats = expected_stats_by_mode.expected_file_stats(
-            mode_to_dir= server_dirs.mode_to_expected_dirs(file_modes),
-            mode_to_file=server_dirs.mode_to_expected_files(file_modes)
+            mode_to_dir= dirs.mode_to_expected_dirs(file_modes),
+            mode_to_file=dirs.mode_to_expected_files(file_modes)
         )
         return
 
@@ -563,7 +394,7 @@ class ActionModule(SpireActionBase):
         owner: str = self._get_str_from_original_task_args("spire_server_install_file_owner")
         return owner
 
-    def _ensure_spire_server_service_files_installed(
+    def _ensure_service_files_installed(
             self, task_vars: Dict[str, Any] = None,
     ) -> None:
         diff: DiffSpireCmptActualExpected = self.diff_actual_expected
@@ -575,13 +406,13 @@ class ActionModule(SpireActionBase):
             "owner": self.get_install_file_owner(),
             "mode": action_data.expected_file_modes_effective.mode_file_not_exe
         }
-        server_dirs: ServerDirs = action_data.server_dirs
+        dirs: ServerDirs = action_data.dirs
 
         #(label,source,destination)
         copy_task_specs =[
-            ("server.env", config.env_file, server_dirs.path_env_file),
-            ("server.conf", config.conf_file, server_dirs.path_conf_file),
-            ("spire_server.service", config.service_file, server_dirs.path_service_file)
+            ("server.env", config.env_file, dirs.path_env_file),
+            ("server.conf", config.conf_file, dirs.path_conf_file),
+            ("spire_server.service", config.service_file, dirs.path_service_file)
         ]
         for label, src, dest in copy_task_specs:
             if diff.need_content_change(dest):
@@ -618,17 +449,17 @@ class ActionModule(SpireActionBase):
             self, task_vars: Dict[str, Any] = None
     ) -> None:
         original_task_args = self._task.args
-        service_scope = self._get_spire_server_service_scope_str()
-        server_dirs: ServerDirs = self.action_data.server_dirs
+        service_scope = self._get_service_scope_str()
+        dirs: ServerDirs = self.action_data.dirs
         module_args = {
-            "spire_server_config_dir": server_dirs.config_dir,
-            "spire_server_data_dir": server_dirs.data_dir,
-            "spire_server_install_dir": server_dirs.install_dir,
-            "spire_server_service_dir": server_dirs.service_dir,
-            "spire_server_log_dir": server_dirs.log_dir,
+            "spire_server_config_dir": dirs.config_dir,
+            "spire_server_data_dir": dirs.data_dir,
+            "spire_server_install_dir": dirs.install_dir,
+            "spire_server_service_dir": dirs.service_dir,
+            "spire_server_log_dir": dirs.log_dir,
             "spire_server_registration_uds_path":
                 self._get_str_from_original_task_args("spire_server_registration_uds_path"),
-            "spire_server_service_name": server_dirs.service_name,
+            "spire_server_service_name": dirs.service_name,
             "spire_server_service_scope": service_scope
         }
 
@@ -680,8 +511,8 @@ class ActionModule(SpireActionBase):
             raise RuntimeError(msg)
 
     def need_spire_binary_change(self) -> bool:
-        need_change = self.diff_actual_expected.need_binary_change(
-            bin_file=self.action_data.server_dirs.path_executable
+        need_change: bool = self.diff_actual_expected.need_binary_change(
+            bin_file=self.action_data.dirs.path_executable
         )
         return need_change
 
@@ -708,7 +539,7 @@ class ActionModule(SpireActionBase):
             # - use ansible creation mechanims
             # - or register temp dir for deletion
             self.action_data.local_temp_work_dir = make_local_temp_work_dir("spire-server-work-dir")
-            self.action_data.server_dirs = ServerDirs.from_ansible_src(
+            self.action_data.dirs = ServerDirs.from_ansible_src(
                                                 self._get_str_from_original_task_args)
             self.__ensure_expected_config_available_locally(task_vars=tv)
             self._get_spire_server_info(task_vars=tv)
@@ -722,7 +553,7 @@ class ActionModule(SpireActionBase):
                     )
                 }
 
-            if self.diff_actual_expected.need_change(): # self.action_data.need_change():
+            if self.diff_actual_expected.need_change():
                 changed = True
                 if State.present == self.action_data.expected_state.state:
                     # stop_spire_server_if_started()
@@ -732,8 +563,8 @@ class ActionModule(SpireActionBase):
                     self.action_data.downloaded_dist_path = self._download_spire_release(
                         download_decider=self.need_spire_binary_change
                     )
-                    self._ensure_spire_server_dir_structure_and_binary_available(task_vars=tv)
-                    self._ensure_spire_server_service_files_installed(task_vars=tv)
+                    self._ensure_dir_structure_and_binary_available(task_vars=tv)
+                    self._ensure_service_files_installed(task_vars=tv)
                 self._execute_actual_spire_ansible_module(task_vars=tv)
                 self._get_spire_server_info(task_vars=tv)
                 diff_after_change: DiffSpireCmptActualExpected = self.action_data.diff()

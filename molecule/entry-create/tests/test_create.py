@@ -20,8 +20,6 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils import (
     spire_server_entry_cmd as show,
 )
 from testinfra.backend.base import CommandResult
-from testinfra.modules.command import Command
-
 
 testinfra_hosts = ["ansible://spire_server"]
 

@@ -22,7 +22,7 @@ import os
 def do_pytest_runtest_setup(item):
     """Run tests only when under molecule with testinfra installed."""
     try:
-        import testinfra
+        import testinfra  # type: ignore
     except ImportError:
         pytest.skip("Test requires testinfra", allow_module_level=True)
     else:

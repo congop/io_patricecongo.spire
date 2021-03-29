@@ -28,3 +28,4 @@ class AgentTemplates:
         self.tmpl_service = os.path.join(tmpl_dir, "spire-agent-default.service.j2")
         self.tmpl_service_env = os.path.join(tmpl_dir, "spire-agent-default.service-env.j2")
         self.tmpl_conf = os.path.join(tmpl_dir, "spire-agent-default.conf.j2")
+        self.tmpl_server_bundle = os.path.join(tmpl_dir, "server-bundle-default.conf.j2")

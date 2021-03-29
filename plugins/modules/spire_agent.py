@@ -28,6 +28,10 @@ import shutil
 from typing import Any, Dict
 
 from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_agent_info_cmd import (
+    AgentDirs,
+    SpireAgentInfo
+)
 from ansible_collections.io_patricecongo.spire.plugins.module_utils import (
     healthchecks,
     logging,
@@ -156,6 +160,13 @@ options:
         required: false
         default: "root"
 
+    spire_agent_install_dir_mode:
+        description:
+            - mode for directories
+            - e.g. "u=rw,g=rw,o="
+        required: false
+        default: "u=rw,g=rw,o="
+
     spire_agent_install_file_mode:
         description:
             - mode for installed files
@@ -208,12 +219,12 @@ options:
             - the target directory for spire_agent logging
         required: false
         default: /var/log/
-    spire_agent_service_params_name:
+    spire_agent_service_name:
         description:
             - systemd service name for the spire agent
         required: false
         default: spire_agent
-    spire_agent_service_params_scope:
+    spire_agent_service_scope:
         description:
             - the scope of the systemd service
         required: false
@@ -264,8 +275,8 @@ EXAMPLES = '''
         spire_agent_trust_domain: "example.org"
         spire_agent_socket_path: "/tmp/agent.sock"
         spire_agent_log_dir: spire_agent_log_dir
-        spire_agent_service_params_name: "spire_agent"
-        spire_agent_service_params_scope: "system"
+        spire_agent_service_name: "spire_agent"
+        spire_agent_service_scope: "system"
         spire_agent_healthiness_probe_timeout_seconds: 15
 
         spire_download_url: "file:///tmp/download/docker-spire-server/.download/spire-0.10.0-linux-x86_64-glibc.tar.gz"
@@ -325,10 +336,12 @@ def _module_args() -> Dict[str, Dict[str,Any]]:
             defaults="/etc/systemd/system"),
         spire_agent_install_file_owner=dict(
             type="str", required=False, defaults="root"),
+        spire_agent_install_dir_mode=dict(
+            type="str", required=False, defaults="u=rw,g=rw,o="),
         spire_agent_install_file_mode=dict(
-            type="str", required=False, defaults="u=rw,g=r"),
+            type="str", required=False, defaults="u=rw,g=rw"),
         spire_agent_install_file_mode_exe=dict(
-            type="str", required=False, defaults="u=xrw,g=xr,o=xr"),
+            type="str", required=False, defaults="u=xrw,g=xrw,o=xr"),
 
         spire_agent_version=dict(type="str", required=True),
         spire_agent_additional_spiffe_id=dict(type="str", required=True),
@@ -341,9 +354,9 @@ def _module_args() -> Dict[str, Dict[str,Any]]:
             type="str", required=False, defaults="/tmp/agent.sock"),
         spire_agent_log_dir=dict(
             type="str", required=False, defaults="/var/log"),
-        spire_agent_service_params_name=dict(
+        spire_agent_service_name=dict(
             type="str", required=False, defaults="spire_agent"),
-        spire_agent_service_params_scope=dict(
+        spire_agent_service_scope=dict(
             type="str", required=False, __defaults="system"),
         spire_agent_healthiness_probe_timeout_seconds=dict(
             type="int", required=True, defaults=5),
@@ -368,15 +381,20 @@ def run_module() -> None:
     func_log = logging.CachingLogger(module.log)
 
     try:
-        agent_info: spire_agent_info_cmd.SpireAgentInfo = spire_agent_info_cmd.SpireAgentInfo(
-            run_command=func_run_command,
-            log_func=func_log,
+        dirs: AgentDirs = AgentDirs(
             config_dir=module.params["spire_agent_config_dir"],
             data_dir=module.params["spire_agent_data_dir"],
+            log_dir=module.params["spire_agent_log_dir"],
+            service_dir=module.params["spire_agent_service_dir"],
             install_dir=module.params["spire_agent_install_dir"],
+            service_name=module.params["spire_agent_service_name"],
+        )
+        agent_info: SpireAgentInfo = SpireAgentInfo(
+            run_command=func_run_command,
+            log_func=func_log,
+            dirs=dirs,
             socket_path=module.params["spire_agent_socket_path"],
-            service_name=module.params["spire_agent_service_params_name"],
-            service_scope=module.params["spire_agent_service_params_scope"],
+            service_scope=module.params["spire_agent_service_scope"],
         )
         state_snapshot = spire_agent_info_cmd.AgentStateSnapshot(agent_info)
         current_state: StateOfAgent = state_snapshot.get_state_of_agent()
@@ -384,8 +402,8 @@ def run_module() -> None:
         if expected_state.need_change(current_state):
             func_log(f"Change expected:state={expected_state.state}")
             service = systemd.SpireComponentService(
-                service_name=module.params["spire_agent_service_params_name"],
-                scope=systemd.Scope.by_name(module.params["spire_agent_service_params_scope"]),
+                service_name=module.params["spire_agent_service_name"],
+                scope=systemd.Scope.by_name(module.params["spire_agent_service_scope"]),
                 run_command=func_run_command,
                 log_func=func_log
             )
@@ -428,7 +446,7 @@ def run_module() -> None:
                                 timeout = module.params["spire_agent_healthiness_probe_timeout_seconds"]
                                 healthcheck = healthchecks.CheckAgent(
                                     run_command=func_run_command,
-                                    file_spire_agent_bin=agent_info.executable,
+                                    file_spire_agent_bin=dirs.path_executable,
                                     readiness_probe_timeout_seconds=timeout,
                                     socket_path=module.params["spire_agent_socket_path"]
                                 )
@@ -440,7 +458,7 @@ def run_module() -> None:
                                 timeout = module.params["spire_agent_healthiness_probe_timeout_seconds"]
                                 healthcheck = healthchecks.CheckAgent(
                                     run_command=func_run_command,
-                                    file_spire_agent_bin=agent_info.executable,
+                                    file_spire_agent_bin=dirs.path_executable,
                                     readiness_probe_timeout_seconds=timeout,
                                     socket_path=module.params["spire_agent_socket_path"]
                                 )

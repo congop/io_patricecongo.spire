@@ -18,15 +18,10 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
 import json
 import os
-import shutil
-import sys
-import tempfile
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict
 
-import pytest
 from testinfra.backend.base import CommandResult
 from testinfra.host import Host
-from testinfra.modules.command import Command
 import testinfra.utils.ansible_runner
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.systemd import Scope
 

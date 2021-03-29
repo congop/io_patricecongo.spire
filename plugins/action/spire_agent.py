@@ -21,37 +21,52 @@
 # Make coding more python3-ish, this is required for contributions to Ansible
 from datetime import datetime, timezone
 import os
-from typing import Any, Callable, Dict, List, NamedTuple, Tuple, Union, cast
-
-from ansible import constants
-from ansible.playbook import task as module_task
-from ansible.plugins.action import ActionBase
-
-try:
-    from ansible.modules import get_url
-except (ModuleNotFoundError, ImportError):
-    # for ansible 2.9.x
-    # from ansible.modules.net_tools.basics import get_url
-    import importlib
-    get_url = importlib.import_module("ansible.modules.net_tools.basics.get_url")
-
-import tempfile
-from urllib.parse import urlparse
+import time
+from typing import Any, Callable, Dict, List, Tuple, Union, cast
 
 from ansible.inventory.host import Host
 from ansible.inventory.manager import InventoryManager
 from ansible.parsing import dataloader
+from ansible.playbook import task as module_task
 from ansible.playbook.play import Play
 from ansible.playbook.play_context import PlayContext
 from ansible.playbook.task import Task
 from ansible.plugins import loader as plugins_loader
 from ansible.plugins.connection.__init__ import ConnectionBase
-from ansible.plugins.connection.local import Connection
 from ansible.template import Templar
 from ansible.vars.manager import VariableManager
-from ansible_collections.io_patricecongo.spire.plugins.module_utils import join_token, logging, strings
+from ansible_collections.io_patricecongo.spire.plugins.module_utils import join_token, logging
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.agent_templates.resources import (
     AgentTemplates,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.diffs import (
+    DigestDiff,
+    StrResourceDiff,
+    VersionDiff,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.digests import (
+    digest_hcl_file,
+    digest_ini_file,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.file_stat import (
+    ExpectedStatsByMode,
+    FileModes,
+    FileStats,
+    FileStatsDiff,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_outcome import (
+    assert_shell_or_cmd_task_successful,
+    assert_task_did_not_failed,
+)
+
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_action_base import (
+    DiffSpireCmptActualExpected,
+    SpireActionBase,
+    SpireTemplateRes,
+    make_local_temp_work_dir,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_agent_info_cmd import (
+    AgentDirs,
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_agent_registration_info_cmd import (
     AgentRegistrationEntry,
@@ -59,27 +74,16 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_agent_
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing import (
     State,
     StateOfAgent,
+    StateOfAgentDiff,
     SubStateAgentRegistered,
     SubStateServiceInstallation,
     SubStateServiceStatus,
 )
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.net_utils import(
-    is_localhost,
-    url_filename
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.systemd import Scope
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.tar_utils import (
+    extract_tar_member,
 )
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_outcome import(
-    assert_task_did_not_failed,
-    assert_shell_or_cmd_task_successful
-)
-
-
-def make_local_temp_work_dir() -> str:
-    local_tempdir: str = tempfile.mkdtemp(
-                            dir=constants.DEFAULT_LOCAL_TMP,
-                            prefix="spire-agent-work-dir")
-    return local_tempdir
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.users import User
 
 
 class AgentRegistrationInfoResultAdapter:
@@ -115,29 +119,36 @@ class AgentInfoResultAdapter:
     def __init__(self, result: Dict[str, Any]) -> None:
         result = result or {}
         self.result = result or {}
-        self.spire_agent_installed: bool = result.get("spire_agent_installed", "False")
-        self.spire_agent_spiffe_id: str = result.get("spire_agent_spiffe_id")
-        self.spire_agent_serial_number: str = result.get("spire_agent_serial_number")
-        self.spire_agent_spiffe_id_issue: str = result.get("spire_agent_spiffe_id_issue")
-        self.spire_agent_version: str = result.get("spire_agent_version")
-        self.spire_agent_version_issue: str = result.get("spire_agent_version_issue")
-        self.spire_agent_executable_path: str = result.get("spire_agent_executable_path")
-        self.spire_agent_trust_domain_id: bool = result.get("spire_agent_trust_domain_id")
-        self.spire_agent_trust_domain_id_issue: str = result.get("spire_agent_trust_domain_id_issue")
-        self.spire_agent_is_healthy: bool = result.get("spire_agent_is_healthy", False)
-        self.spire_agent_is_healthy_issue: str = result.get("spire_agent_is_healthy_issue")
-        self.spire_agent_service_installed: bool = result.get("spire_agent_service_installed", False)
-        self.spire_agent_service_installed_issue: str = result.get("spire_agent_service_installed_issue")
-        self.spire_agent_service_running: bool = result.get("spire_agent_service_running", False)
-        self.spire_agent_service_running_issue: str = result.get("spire_agent_service_running_issue")
-        self.spire_agent_service_enabled: bool = result.get("spire_agent_service_enabled", False)
-        self.spire_agent_service_enabled_issue: str = result.get("spire_agent_service_enabled_issue")
+        self.installed: bool = result.get("spire_agent_installed", "False")
+        self.spiffe_id: str = result.get("spire_agent_spiffe_id")
+        self.serial_number: str = result.get("spire_agent_serial_number")
+        self.spiffe_id_issue: str = result.get("spire_agent_spiffe_id_issue")
+        self.version: str = result.get("spire_agent_version")
+        self.version_issue: str = result.get("spire_agent_version_issue")
+        self.executable_path: str = result.get("spire_agent_executable_path")
+        self.trust_domain_id: bool = result.get("spire_agent_trust_domain_id")
+        self.trust_domain_id_issue: str = result.get("spire_agent_trust_domain_id_issue")
+        self.is_healthy: bool = result.get("spire_agent_is_healthy", False)
+        self.is_healthy_issue: str = result.get("spire_agent_is_healthy_issue")
+        self.service_scope: Scope = Scope.by_name(result.get("spire_agent_service_scope") )
+        self.service_scope_issue: str = result.get("spire_agent_service_scope_issue")
+        self.service_installed: bool = result.get("spire_agent_service_installed", False)
+        self.service_installed_issue: str = result.get("spire_agent_service_installed_issue")
+        self.service_running: bool = result.get("spire_agent_service_running", False)
+        self.service_running_issue: str = result.get("spire_agent_service_running_issue")
+        self.service_enabled: bool = result.get("spire_agent_service_enabled", False)
+        self.service_enabled_issue: str = result.get("spire_agent_service_enabled_issue")
         self.is_registered: bool = False
+        self.hexdigest_service_file = result.get("spire_agent_hexdigest_service_file")
+        self.hexdigest_service_file_issue = result.get("spire_agent_hexdigest_service_file_issue")
+        self.hexdigest_config_file = result.get("spire_agent_hexdigest_config_file")
+        self.hexdigest_config_file_issue = result.get("spire_agent_hexdigest_config_file_issue")
+        self.file_stats: FileStats = FileStats.from_ansible_result(result, "spire_agent_file_stats")
 
     def spire_agent_serial_number_as_int(self) -> int:
         '''Return the serial number as interger  or -1 if no value is avalaible yet'''
-        if self.spire_agent_serial_number:
-            return int(self.spire_agent_serial_number)
+        if self.serial_number:
+            return int(self.serial_number)
         return None
 
     def __get_issues_issues(self) -> str:
@@ -151,23 +162,23 @@ class AgentInfoResultAdapter:
             return SubStateAgentRegistered.no
 
     def __get_state(self) -> State:
-        if self.spire_agent_installed:
+        if self.installed:
             return State.present
         else:
             return State.absent
 
     def __get_state_service_status(self) -> SubStateServiceStatus:
-        if self.spire_agent_is_healthy:
+        if self.is_healthy:
             return SubStateServiceStatus.healthy
-        elif self.spire_agent_service_running:
+        elif self.service_running:
             return SubStateServiceStatus.started
         else:
             return SubStateServiceStatus.stopped
 
     def __get_state_service_installation(self) -> SubStateServiceInstallation:
-        if self.spire_agent_service_enabled:
+        if self.service_enabled:
             return SubStateServiceInstallation.enabled
-        elif self.spire_agent_service_installed:
+        elif self.service_installed:
             return SubStateServiceInstallation.installed
         else:
             return SubStateServiceInstallation.not_installed
@@ -183,56 +194,34 @@ class AgentInfoResultAdapter:
     def to_ansible_return_data(self) -> Dict[str, Union[str, bool, Dict[str, Any]]]:
         state_data = self.to_detected_state().to_ansible_return_data()
         return {**state_data,
-                "actual_spire_agent_version": self.spire_agent_version,
-                "actual_spire_agent_serial_number": self.spire_agent_serial_number,
-                "actual_spire_agent_spiffe_id": self.spire_agent_spiffe_id,
-                "actual_spire_agent_trust_domain_id": self.spire_agent_trust_domain_id,
-                "actual_spire_agent_executable_path": self.spire_agent_executable_path,
+                "actual_spire_agent_version": self.version,
+                "actual_spire_agent_serial_number": self.serial_number,
+                "actual_spire_agent_spiffe_id": self.spiffe_id,
+                "actual_spire_agent_trust_domain_id": self.trust_domain_id,
+                "actual_spire_agent_executable_path": self.executable_path,
                 "actual_spire_agent_get_info_issue": self.__get_issues_issues(),
                 "actual_spire_agent_get_info_result": self.result
                 }
 
 
-class AgentDirs:
-    def __init__(self, lookup_func: Callable[[str], str]):
-        self.spire_agent_config_dir: str = lookup_func("spire_agent_config_dir")
-        self.spire_agent_data_dir: str = lookup_func("spire_agent_data_dir")
-        self.spire_agent_install_dir: str = lookup_func("spire_agent_install_dir")
-        self.spire_agent_install_dir_bin: str = os.path.join(self.spire_agent_install_dir, "bin")
-        self.spire_agent_service_dir: str = lookup_func("spire_agent_service_dir")
-        self.spire_agent_log_dir: str = lookup_func("spire_agent_log_dir")
-        self.spire_agent_service_name = lookup_func("spire_agent_service_params_name")
-        self.spire_agent_service_filename = self.spire_agent_service_name
-        if self.spire_agent_service_filename.endswith(".service"):
-            self.spire_agent_service_name = os.path.splitext(self.spire_agent_service_name)[0]
-        else:
-            self.spire_agent_service_filename = f"{self.spire_agent_service_name}.service"
-
-    def path_agent_conf(self) -> str:
-        return os.path.join(self.spire_agent_config_dir, "agent.conf")
-
-    def path_agent_env(self) -> str:
-        return os.path.join(self.spire_agent_config_dir, "agent.env")
-
-    def path_trust_bundle_pem(self) -> str:
-        return os.path.join(self.spire_agent_config_dir, "trust_bundle.pem")
-
-    def path_agent_service(self) -> str:
-        return os.path.join(self.spire_agent_service_dir, self.spire_agent_service_filename)
-
-
 class AgentActionData:
     def __init__(self) -> None:
         self.local_temp_work_dir: str = None
-        self.agent_templates: AgentTemplates = None
+        self.templates: AgentTemplates = None
         self.join_token: str = None
         self.spire_server_bundle: str = None
         self.spire_agent_info: AgentInfoResultAdapter = AgentInfoResultAdapter({})
         self.spire_server_version: str = None
         self.downloaded_dist_path: str = None
         self.expected_state: StateOfAgent = None
-        self.agent_dirs: AgentDirs = None
+        self.dirs: AgentDirs = None
+        self.expected_file_modes: FileModes = None
+        self.expected_file_modes_effective: FileModes = None
         self.agent_service_return: Dict[str, Any] = None
+        self.expected_config: ExpectedConfig = None
+        self.expected_stats_by_mode: ExpectedStatsByMode = None
+        self.expected_file_stats: FileStats = None
+        self.expected_user: User = None
 
     def need_change(self) -> bool:
         actual_state = self.spire_agent_info.to_detected_state()
@@ -247,12 +236,140 @@ class AgentActionData:
             return {}
         return {"failed": True}
 
+    def diff(self) -> DiffSpireCmptActualExpected:
+        # TODO move resource(uri) into diff (when executable has moved? how to model that)
+        #info = self.spire_server_info
 
-# https://gist.github.com/ju2wheels/408e2d34c788e417832c756320d05fb5
-# use_vars = task_vars.get('ansible_delegated_vars')[self._task.delegate_to]
-# /home/patdev/software/ansible/ansible-modules-spire/.venv/lib/python3.6/site-packages/ansible/plugins/action/__init__.py
-#  @ 155  def _configure_module
-class ActionModule(ActionBase):  # type: ignore[misc]
+        expected: ExpectedConfig = self.expected_config
+        actual: AgentInfoResultAdapter = self.spire_agent_info
+        dirs: AgentDirs = self.dirs
+        file_stats_diff = FileStatsDiff.for_files(
+            files=dirs.expected_dirs_and_files(),
+            file_stats_actual=actual.file_stats,
+            file_stats_expected=self.expected_file_stats,
+            system_dirs={
+                    "/etc/systemd/system",
+                    "/var/log"
+            },
+            user_system_dirs=set(
+                self.expected_user.system_dirs()
+            )
+        )
+        # file_stats_diff.
+        exe_versions = [
+            VersionDiff(
+                resource_id=dirs.path_executable,
+                version_actual=actual.version,
+                version_expected=expected.spire_version
+            )
+        ]
+        state_diff = StateOfAgentDiff(
+            actual=actual.to_detected_state(),
+            expected=self.expected_state
+        )
+        # "Faking" env-file digest
+        # Using existence to make sure it will be created.
+        # ==>Update not covered
+        # TODO: do real diff
+        #       env is bash file or really just  ini?
+        env_file = dirs.path_env_file
+        env_file_digest_diff = DigestDiff(
+            file=env_file,
+            digest_actual=f"exists={actual.file_stats.exists(env_file)}",
+            digest_expected=f"exists={self.expected_file_stats.exists(env_file)}"
+        )
+
+        # TODO do real bundle content diff
+        bundle_file = dirs.path_trust_bundle_pem
+        bundle_file_digest_diff = DigestDiff(
+            file=bundle_file,
+            digest_actual=f"exists={actual.file_stats.exists(bundle_file)}",
+            digest_expected=f"exists={self.expected_file_stats.exists(bundle_file)}"
+        )
+
+        file_contents: List[DigestDiff] = [
+            DigestDiff(
+                file=dirs.path_conf_file,
+                digest_actual=actual.hexdigest_config_file,
+                digest_expected=expected.config_file_digest
+            ),
+            DigestDiff(
+                file=dirs.path_service_file,
+                digest_actual=actual.hexdigest_service_file,
+                digest_expected=expected.service_file_disgest
+            ),
+            env_file_digest_diff,
+            bundle_file_digest_diff
+        ]
+        scope_diff = StrResourceDiff(
+            resource_id="spire-server-service-scope",
+            actual=Scope.noneOrScope(actual.service_scope),
+            expected=Scope.noneOrScope(expected.service_scope)
+        )
+        diff = DiffSpireCmptActualExpected(
+            scope_diff=scope_diff,
+            exe_versions=exe_versions,
+            file_attrs=list(file_stats_diff.file_stat_diffs.values()),
+            file_contents=file_contents,
+            state_diff=state_diff,
+        )
+        return diff
+
+
+class ExpectedConfig:
+
+    def __init__(
+        self,
+        exe_template_on_localhost: Callable[[SpireTemplateRes], str],
+        templates: AgentTemplates,
+        expected_state: State,
+        expected_spire_version: str,
+        expected_service_scope: Scope,
+        spire_server_bundle: str,
+        join_token: str,
+        task_args: Dict[str, Any]
+    ):
+        self.env_file: str = None
+        self.service_file: str = None
+        self.conf_file: str = None
+        self.trust_bundle_file: str = None
+        self.service_file_disgest: str = None
+        self.config_file_digest: str = None
+        self.spire_version: str = None
+        self.service_scope: Scope = None
+
+        if expected_state == State.present:
+            self.service_scope = expected_service_scope
+            self.spire_version = expected_spire_version
+            #server_templates: ServerTemplates = action_data.server_templates
+            #extra_vars_service_env: Dict[str, str] = {}
+            extra_vars_service_env: Dict[str, str] = {"spire_agent_join_token": join_token}
+            # TODO join-toen is just for creating if agent is running we want
+            # to ignore hashes of file containing it, we do want to avoid creating it when not necesarry
+            # is test present enough?
+            template_resources = [
+                SpireTemplateRes(
+                    label="service.env", src=templates.tmpl_service_env,
+                    extra_vars=extra_vars_service_env),
+                SpireTemplateRes(
+                    label="service", src=templates.tmpl_service,
+                    extra_vars={**task_args}),
+                SpireTemplateRes(
+                    label="conf", src=templates.tmpl_conf,
+                    extra_vars={**task_args}),
+                SpireTemplateRes(
+                    label="server_bundle",
+                    src=templates.tmpl_server_bundle,
+                extra_vars={**task_args, "spire_server_bundle": spire_server_bundle}
+            )
+            ]
+            self.env_file, self.service_file, self.conf_file, self.trust_bundle_file = [
+                exe_template_on_localhost(tres) for tres in template_resources]
+            self.service_file_disgest = digest_ini_file(self.service_file)
+            self.config_file_digest = digest_hcl_file(self.conf_file)
+
+
+class ActionModule(SpireActionBase):
 
     def __init__(
         self, task: Task, connection: ConnectionBase,
@@ -262,281 +379,167 @@ class ActionModule(ActionBase):  # type: ignore[misc]
         super().__init__(
             task=task, connection=connection, play_context=play_context,
             loader=loader, templar=templar,
-            shared_loader_obj=shared_loader_obj)
+            shared_loader_obj=shared_loader_obj,
+            module_fq_name="io_patricecongo.spire.spire_agent")
         self.action_data: AgentActionData = AgentActionData()
+        self.diff_actual_expected: DiffSpireCmptActualExpected = None
 
     def _get_spire_server(self) -> str:
         return "spire_server"
 
-    def _ensure_spire_agent_dir_structure_and_binary_available(
+    def _ensure_dir_structure_and_binary_available(
             self, task_vars: Dict[str, Any] = None
     ) -> None:
-        def extract_spire_agent_binary(downloaded_spire_dist_path: str) -> str:
-            import os
-            import tarfile
-            with tarfile.open(downloaded_spire_dist_path) as tar:
-                spire_agent_binary_as_list = [
-                    e for e in tar
-                    if str(e.name).endswith('/bin/spire-agent') and e.name.startswith("./")]
-                if 1 != len(spire_agent_binary_as_list):
-                    tar_gz_ls = [e.name for e in tar]
-                    msg = f"""could not find spire-agent binaries in tar.gz
-                            tar-gz: {downloaded_spire_dist_path}
-                            tar-gz-content: {tar_gz_ls}
-                        """
-                    raise RuntimeError(msg)
-                target_dir = os.path.dirname(downloaded_spire_dist_path)
-                tar.extractall(members=spire_agent_binary_as_list, path=target_dir)
-                target_file = os.path.join(target_dir, spire_agent_binary_as_list[0].name)
-                target_file = os.path.normpath(target_file)
-
-            return target_file
-
+        file_modes = self.action_data.expected_file_modes_effective
         downloaded_spire_dist_path = self.action_data.downloaded_dist_path
-        agent_dirs: AgentDirs = self.action_data.agent_dirs
-        # TODO use file module instead
-        # - name: Ensure spire-agent data dir (e.g. /var/lib/spire-agent) is available
-        #     file:
-        #         path: "{{ spire_agent_data_dir }}"
-        #         state: directory
-        # !!! maybe with_items to make multiple directories at one instead of manual iteration
-        #   with_items:
-        #     - { path: "ca.pem", mode: "{{ etcd_config_dir }}", serole:.... }
-
-        script_create_dir_struct = f"""mkdir -p {agent_dirs.spire_agent_config_dir} &&
-            mkdir -p {agent_dirs.spire_agent_data_dir} &&
-            mkdir -p {agent_dirs.spire_agent_install_dir_bin} &&
-            mkdir -p {agent_dirs.spire_agent_service_dir} &&
-            mkdir -p {agent_dirs.spire_agent_log_dir}
-            """
-        become = self._task.become
-        rc, stdout, stderr = self._connection.exec_command(
-                                            script_create_dir_struct,
-                                            in_data=None, sudoable=become)
-        if rc != 0:
-            raise RuntimeError(f"""fail to create dir structure:
-                rc={rc}
-                stdout={stdout}
-                stderr={stderr}
-                script_create_dir_struct={script_create_dir_struct}
-                """)
-
-        spire_agent_binary_extracted_path = extract_spire_agent_binary(downloaded_spire_dist_path)
-
-        copy_module_args = {
-            "src": spire_agent_binary_extracted_path,
-            "remote_src": "no",
-            "dest": agent_dirs.spire_agent_install_dir_bin,
-            "owner": self._get_str_from_original_task_args("spire_agent_install_file_owner"),
-            "mode": self._get_str_from_original_task_args("spire_agent_install_file_mode_exe")
-
-        }
-        self._display.vvv(
-            f"""executing copy to spire_agent: {copy_module_args},
-                src.exists: {os.path.exists(spire_agent_binary_extracted_path)}
-            """)
-        original_task: Task = self._task
-        # copy_task_data = {
-        #     "name": f"{original_task.get_name()}-copy-spire-agent",
-        #     "copy": copy_module_args
-        # }
-        current_target_host = task_vars['inventory_hostname']
-        copy_task_name = f"{original_task.get_name()}-copy-spire-agent"
-        copy_play_name = f"Ansible Sub Play - {copy_task_name}"
-        play_source = dict(
-            name=copy_play_name,
-            hosts=[current_target_host],
-            gather_facts='no',
-            tasks=[
-                dict(name=copy_task_name, action=dict(module='copy', args=copy_module_args)),
-            ]
+        dirs: AgentDirs = self.action_data.dirs
+        expected_dirs = dirs.expected_dirs()
+        dirs_needing_change: List[str] = self.diff_actual_expected.dirs_needing_change(expected_dirs)
+        self._create_remote_dirs(
+            task_vars=task_vars,
+            expected_dirs=dirs_needing_change,
+            mode=file_modes.mode_dir
         )
 
-        # Instantiating a play because copy need Task.get_path()
-        #   which will failed if Task._ds is not set and Task._parent._play is not set
-        play: Play = Play.load(data=play_source,
-                               variable_manager=original_task.get_variable_manager(),
-                               loader=original_task.get_loader(),
-                               vars=self._play_context.vars.copy())
-        play_tasks = play.get_tasks()
-        play_tasks_copy = play_tasks[0][0]
+        if  not self.need_spire_binary_change():
+            return
 
-        copy_action = self._shared_loader_obj.action_loader.get('copy',
-                                                                task=play_tasks_copy,
-                                                                connection=self._connection,
-                                                                play_context=self._play_context,
-                                                                loader=self._loader,
-                                                                templar=self._templar,
-                                                                shared_loader_obj=self._shared_loader_obj)
-        mk_cp_struct_ret = copy_action.run(task_vars=task_vars)
+        spire_server_binary_extracted_path = extract_tar_member(
+            downloaded_spire_dist_path,
+            "/bin/spire-agent")
 
-        # self._connection.exec_command(self, cmd, in_data=None, sudoable=True)
-        if not (mk_cp_struct_ret and "file" == mk_cp_struct_ret.get("state")):
-            msg = f"""Fail to copy spire_agent binary to target host:
-                mk_cp_struct_ret={mk_cp_struct_ret}
-            """
-            raise RuntimeError(msg)
+        self._copy_from_controller_to_target(
+            copy_task_label=f"spire-agent({spire_server_binary_extracted_path})",
+            src=spire_server_binary_extracted_path,
+            dest=dirs.install_dir_bin,
+            sec_attributes={
+                "owner": self.get_install_file_owner(),
+                "mode": file_modes.mode_file_exe
+            },
+            task_vars=task_vars,
+        )
         return
 
     def _get_current_spire_agent_host(self, task_vars: Dict[str, Any]) -> str:
         return cast(str, task_vars['inventory_hostname'])
 
-    def _copy_from_controller_to_spire_agent(
-            self, task_vars: Dict[str, Any],
-            copy_task_label: str,
-            src: str, dest: str, sec_attributes: Dict[str, Any]
-    ) -> None:
-        actual_sec_attributes = {}
-        if sec_attributes:
-            supported_sec_attribute_keys = ["owner", "mode"]
-            actual_sec_attributes = {key: value for key, value in sec_attributes.items() if
-                                     value and key in supported_sec_attribute_keys}
+    def _get_service_scope_str(self) -> str:
+        return cast(str, self._task.args.get("spire_agent_service_scope"))
 
-        copy_module_args = {
-            "src": src,
-            "remote_src": "no",
-            "dest": dest,
-            **actual_sec_attributes
-        }
+    def _get_expected_service_scope(self) -> Scope:
+         scope_str = self._get_service_scope_str()
+         if scope_str:
+            return Scope.by_name(scope_str)
+         return Scope.scope_system
 
-        self._display.vvv(f"""executing copy {copy_task_label} to spire_agent:
-            copy_module_args: {copy_module_args},
-            src.exists: {os.path.exists(src)}
-            """)
-        original_task: Task = self._task
-        current_target_host = self._get_current_spire_agent_host(task_vars=task_vars)
-        copy_task_name = f"{original_task.get_name()}-copy-spire-agent"
-        copy_play_name = f"Ansible Sub Play - {copy_task_name}"
-        play_source = dict(
-            name=copy_play_name,
-            hosts=[current_target_host],
-            gather_facts='no',
-            tasks=[
-                dict(name=copy_task_name, action=dict(module='copy', args=copy_module_args)),
-            ]
-        )
+    def get_expected_version(self) -> str:
+        return cast(str, self._task.args.get("spire_agent_version"))
 
-        # Instantiating a play because copy need Task.get_path()
-        #   which will failed if Task._ds is not set and Task._parent._play is not set
-        play: Play = Play.load(data=play_source,
-                               variable_manager=original_task.get_variable_manager(),
-                               loader=original_task.get_loader(),
-                               vars=self._play_context.vars.copy())
-        play_tasks = play.get_tasks()
-        play_tasks_copy = play_tasks[0][0]
+    def __ensure_expected_config_available_locally(
+                self, task_vars: Dict[str, Any] = None,
+        ) -> None:
+            action_data = self.action_data
 
-        copy_action = self._shared_loader_obj.action_loader.get('copy',
-                                                                task=play_tasks_copy,
-                                                                connection=self._connection,
-                                                                play_context=self._play_context,
-                                                                loader=self._loader,
-                                                                templar=self._templar,
-                                                                shared_loader_obj=self._shared_loader_obj)
-        mk_cp_struct_ret = copy_action.run(task_vars=task_vars)
+            expected_state = StateOfAgent.from_task_args(self._task.args)
+            action_data.expected_state = expected_state
 
-        # self._connection.exec_command(self, cmd, in_data=None, sudoable=True)
-        if not (mk_cp_struct_ret and "file" == mk_cp_struct_ret.get("state")):
-            msg = f"""Fail to copy {copy_task_label} to target host {current_target_host}:
-                mk_cp_struct_ret={mk_cp_struct_ret}
-            """
-            raise RuntimeError(msg)
-        return
+            action_data.expected_user = self.remote_user_data()
 
-    def __make_tempfile_with_data(self, prefix: str = None, suffix: str = None, data: str = '') -> str:
-        fd, template_dest_local = tempfile.mkstemp(prefix=prefix, suffix=suffix)
-        with open(fd, mode="wt") as dest_file:
-            dest_file.write(data)
-        return str(template_dest_local)
+            file_modes = FileModes.from_dict(
+                data=self._task.args,
+                mapping= {
+                    "mode_dir": "spire_agent_install_dir_mode",
+                    "mode_file_not_exe": "spire_agent_install_file_mode",
+                    "mode_file_exe": "spire_agent_install_file_mode_exe"
+                }
+            )
+            action_data.expected_file_modes = file_modes
 
-    def __make_tempfile_name(self, prefix: str = None, suffix: str = None) -> str:
-        local_temp_work_dir: str = self.action_data.local_temp_work_dir
-        template_dest_local = tempfile.mktemp(dir=local_temp_work_dir, prefix=prefix, suffix=suffix)
-        return template_dest_local
+            state = expected_state.state
+            action_data.expected_config = ExpectedConfig(
+                exe_template_on_localhost=self._exe_template_on_localhost,
+                templates=action_data.templates,
+                expected_state=state,
+                expected_spire_version=self.get_expected_version(),
+                expected_service_scope=self._get_expected_service_scope(),
+                task_args=self._task.args,
+                spire_server_bundle=self._get_spire_server_bundle(), # action_data.spire_server_bundle,
+                join_token=self._get_join_token() # TODO onyl if we are going to need it
+            )
 
-    def _get_spire_agent_service_name(self) -> str:
-        return cast(str, self._task.args.get("spire_agent_service_params_name"))
+            if state == State.present:
+                expected_stats_by_mode_builder = ExpectedStatsByMode.assuming_present
+            else:
+                expected_stats_by_mode_builder = ExpectedStatsByMode.assuming_absent
 
-    def _get_spire_agent_service_scope(self) -> str:
-        return cast(str, self._task.args.get("spire_agent_service_params_scope"))
+            #file_modes = action_data.expected_file_modes
+            expected_stats_by_mode = expected_stats_by_mode_builder(
+                dir_modes = [
+                    file_modes.mode_dir
+                ],
+                file_modes = [
+                    file_modes.mode_file_not_exe,
+                    file_modes.mode_file_exe
+                ],
+                task_vars= task_vars,
+                file_access=self
+            )
+            file_modes_effective = expected_stats_by_mode.effective_modes(file_modes)
+            action_data.expected_file_modes_effective = file_modes_effective
+            action_data.expected_stats_by_mode = expected_stats_by_mode
+            dirs = action_data.dirs
+            action_data.expected_file_stats = expected_stats_by_mode.expected_file_stats(
+                mode_to_dir= dirs.mode_to_expected_dirs(file_modes),
+                mode_to_file=dirs.mode_to_expected_files(file_modes)
+            )
+            return
 
-    def _ensure_spire_agent_service_files_installed(
+    def get_install_file_owner(self) -> str:
+        owner: str = self._get_str_from_original_task_args("spire_agent_install_file_owner")
+        return owner
+
+    def _ensure_service_files_installed(
             self, task_vars: Dict[str, Any] = None,
     ) -> None:
-        class SpireAgentTemplateRes(NamedTuple):
-            label: str
-            src: str
-            extra_vars: Dict[str, Any]
-
-        def exe_template(res: SpireAgentTemplateRes) -> str:
-            template_label = res.label
-            template_src = res.src
-            extra_vars = res.extra_vars
-            target_host_local = "localhost"
-            template_dest_local = self.__make_tempfile_name(prefix="spire_agent", suffix=template_label)
-            original_task: Task = self._task
-            task_data = {
-                "name": f"{original_task.get_name()}-template-{template_label}",
-                "template": {
-                    "src": template_src,
-                    "dest": template_dest_local
-                },
-                "vars": extra_vars
-            }
-            ret = self._run_sub_task(task_data=task_data, hostname=target_host_local, action_name='template')
-            if ret.get("failed", False):
-                msg = f"""Fail to local template {template_label}:
-                    return={ret}
-                """
-                raise RuntimeError(msg)
-            return template_dest_local
-
+        diff: DiffSpireCmptActualExpected = self.diff_actual_expected
         action_data = self.action_data
-        agent_templates: AgentTemplates = action_data.agent_templates
-        extra_vars_service_env = {"spire_agent_join_token": action_data.join_token}
+        config: ExpectedConfig = action_data.expected_config
 
-        template_resources = [
-            SpireAgentTemplateRes(label="service.env", src=agent_templates.tmpl_service_env,
-                                  extra_vars=extra_vars_service_env),
-            SpireAgentTemplateRes(label="service", src=agent_templates.tmpl_service, extra_vars={**self._task.args}),
-            SpireAgentTemplateRes(label="conf", src=agent_templates.tmpl_conf, extra_vars={**self._task.args})
-        ]
-        env_file, service_file, conf_file = [exe_template(tres) for tres in template_resources]
         # TODO sec attribute for each file at least executable vs config vs secrets
         sec_attributes = {
-            "owner": self._get_str_from_original_task_args("spire_agent_install_file_owner"),
-            "mode": self._get_str_from_original_task_args("spire_agent_install_file_mode")
+            "owner": self.get_install_file_owner(),
+            "mode": action_data.expected_file_modes_effective.mode_file_not_exe
         }
+        dirs: AgentDirs = action_data.dirs
 
-        agent_dirs: AgentDirs = self.action_data.agent_dirs
-        self._copy_from_controller_to_spire_agent(
-            task_vars=task_vars, copy_task_label="agent.env", src=env_file,
-            dest=agent_dirs.path_agent_env(),
-            sec_attributes=sec_attributes.copy())
-        self._copy_from_controller_to_spire_agent(
-            task_vars=task_vars, copy_task_label="agent.conf", src=conf_file,
-            dest=agent_dirs.path_agent_conf(),
-            sec_attributes=sec_attributes.copy())
-
-        self._copy_from_controller_to_spire_agent(
-            task_vars=task_vars, copy_task_label="spire_agent.service", src=service_file,
-            dest=agent_dirs.path_agent_service(),
-            sec_attributes=sec_attributes.copy())
-        local_trust_bundle = self.__make_tempfile_with_data(
-            prefix="trust_bundle", suffix=".pem",
-            data=action_data.spire_server_bundle)
-
-        self._copy_from_controller_to_spire_agent(
-            task_vars=task_vars, copy_task_label="trust_bundle.pem", src=local_trust_bundle,
-            dest=agent_dirs.path_trust_bundle_pem(),
-            sec_attributes=sec_attributes.copy())
+        #(label,source,destination)
+        copy_task_specs =[
+            ("agent.env", config.env_file, dirs.path_env_file),
+            ("agent.conf", config.conf_file, dirs.path_conf_file),
+            ("agent_server.service", config.service_file, dirs.path_service_file),
+            ("trust-bundle.pem", config.trust_bundle_file, dirs.path_trust_bundle_pem)
+        ]
+        for label, src, dest in copy_task_specs:
+            if diff.need_content_change(dest):
+                self._copy_from_controller_to_target(
+                    task_vars=task_vars, copy_task_label=label,
+                    src=src, dest=dest,
+                    sec_attributes=sec_attributes.copy())
+            elif diff.need_attrs_change(dest):
+                self.create_remote_file(
+                    file_path=dest,
+                    mode=None,
+                    state="file",
+                    task_vars=task_vars,
+                    module_args_overrides=sec_attributes.copy(),
+                )
 
     def _wait_for_spire_agent_healthy(self, task_vars: Dict[str, Any] = None) -> None:
         def found_that_agent_is_healthy() -> bool:
             info = self.action_data.spire_agent_info
-            is_healthy = info.spire_agent_is_healthy
+            is_healthy = info.is_healthy
             return is_healthy
 
-        import time
         self._get_spire_agent_info(task_vars=task_vars, with_registration_check=False)
         timeout = self._get_float_from_original_task_args("spire_agent_healthiness_probe_timeout_seconds")
         if timeout is None:
@@ -582,50 +585,8 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             "command": module_args,
         }
 
-        version_ret = self._run_sub_task(task_data=data, hostname=spire_server_host)
+        version_ret: Dict[str, Any] = self._run_sub_task(task_data=data, hostname=spire_server_host)
 
-        return version_ret
-
-    def _run_sub_task(
-            self,
-            task_data: Dict[str, Any] = None,
-            hostname: str = None,
-            action_name: str = 'normal'
-    ) -> Dict[str, Any]:
-        task_vars, task, host = self._make_module_task_vars(task_data=task_data, hostname=hostname)
-
-        try:
-            ansible_host = host.address  # get_name()#task_vars['ansible_host']#:'localhost'
-            connection_name = task_vars.get('ansible_connection')  # :'local'
-            if not connection_name and is_localhost(host):
-                self._display.warning(f"supposing ansible_collection=local for {host}")
-                connection_name = "local"
-            # TODO What about become and username
-            play: Play = Play.load({
-                "hosts": hostname},
-                variable_manager=task.get_variable_manager(),
-                loader=task.get_loader())
-
-            play_context = PlayContext(play=play)
-            if not play_context.remote_addr:
-                play_context.remote_addr = ansible_host  # cmd_task_vars['ansible_delegated_vars'][spire_server_host][]
-                # ...'ansible_host': 'localhost'
-                # ...'inventory_hostname':'spire_server'
-                # ...'inventory_hostname_short':'spire_server'
-
-            connection: ConnectionBase = self._shared_loader_obj.connection_loader.get(connection_name, play_context,
-                                                                                       os.devnull)
-            normal_action = self._shared_loader_obj.action_loader.get(action_name,
-                                                                      task=task,
-                                                                      connection=connection,
-                                                                      play_context=play_context,
-                                                                      loader=task.get_loader(),
-                                                                      templar=self._templar,
-                                                                      shared_loader_obj=self._shared_loader_obj)
-            version_ret: Dict[str, Any] = normal_action.run(task_vars=task_vars)
-        finally:
-            # self._task = original_task
-            pass
         return version_ret
 
     def _get_spire_server_version(self, task_vars: Dict[str, Any] = None) -> None:
@@ -635,28 +596,30 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             spire_server_cmd_args=["--version"],
             add_uds_path_arg=False)
         spire_server_host = self._get_str_from_original_task_args("spire_server_host")
-        assert_shell_or_cmd_task_successful(version_ret,
-                                                          f"Fail to get spire-server version on [{spire_server_host}]")
+        assert_shell_or_cmd_task_successful(
+            version_ret,
+            f"Fail to get spire-server version on [{spire_server_host}]")
         stdout = version_ret.get("stdout")
         stderr = version_ret.get("stderr")
         self.action_data.spire_server_version = stderr or stdout
 
     def _get_spire_server_bundle(self, task_vars: Dict[str, Any] = None) -> str:
-        # /opt/spire/bin/spire-server bundle show > nestedB/agent/bootstrap.crt
-        version_ret = self._run_spire_server_cmd_sub_task(
-            task_vars=task_vars,
-            task_cmd_label="bundle show",
-            spire_server_cmd_args=["bundle", "show"])
+        if self.action_data.spire_server_bundle is None:
+            # /opt/spire/bin/spire-server bundle show > nestedB/agent/bootstrap.crt
+            version_ret = self._run_spire_server_cmd_sub_task(
+                task_vars=task_vars,
+                task_cmd_label="bundle show",
+                spire_server_cmd_args=["bundle", "show"])
 
-        assert_shell_or_cmd_task_successful(version_ret, "Fail to get spire-server bundle show")
-        stdout = cast(str, version_ret.get("stdout"))
-        self.action_data.spire_server_bundle = stdout
-        return stdout
+            assert_shell_or_cmd_task_successful(version_ret, "Fail to get spire-server bundle show")
+            stdout = cast(str, version_ret.get("stdout"))
+            self.action_data.spire_server_bundle = stdout
+        return self.action_data.spire_server_bundle
 
     def _get_join_token(self, task_vars: Dict[str, Any] = None) -> str:
 
         def args_contrib_ttl() -> List[str]:
-            ttl = self._get_str_from_original_task_args("spire_agent_join_token_ttl")
+            ttl = self._get_int_from_original_task_args("spire_agent_join_token_ttl")
             if ttl is None or str(ttl).isspace():
                 # ttl actually an number, so using <if ttl> is not the same as <if specified> because ttl=0 is false
                 return []
@@ -669,43 +632,27 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             return ["-spiffeID", spire_agent_additional_spiffe_id]
 
             # ./spire-0.10.x/bin/spire-server token generate -spiffeID spiffe://example.org/myagent1
+        if self.action_data.join_token is None:
+            spire_server_cmd_args = [
+                "token", "generate", *args_contrib_additional_spiffe_id(), *args_contrib_ttl()
+            ]
 
-        spire_server_cmd_args = [
-            "token", "generate", *args_contrib_additional_spiffe_id(), *args_contrib_ttl()
-        ]
+            version_ret = self._run_spire_server_cmd_sub_task(
+                task_vars=task_vars,
+                task_cmd_label="token generate",
+                spire_server_cmd_args=spire_server_cmd_args)
 
-        version_ret = self._run_spire_server_cmd_sub_task(
-            task_vars=task_vars,
-            task_cmd_label="token generate",
-            spire_server_cmd_args=spire_server_cmd_args)
+            assert_shell_or_cmd_task_successful(version_ret, "Fail to get spire-server token generate")
 
-        assert_shell_or_cmd_task_successful(version_ret, "Fail to get spire-server token generate")
-
-        token_stdout = version_ret.get("stdout")
-        jointoken: str = join_token.extract_join_token(token_stdout)
-        if not jointoken:
-            msg = f"""Bad token generate stdout format
-                token_stdout={token_stdout}
-            """
-            raise RuntimeError(msg)
-        self.action_data.join_token = jointoken
-        return jointoken  # cast(str,jointoken)
-
-    def _get_str_from_original_task_args(self, key: str) -> str:
-        return cast(str, self._task.args.get(key))
-
-    def _get_float_from_original_task_args(self, key: str) -> float:
-        value = self._task.args.get(key)
-        if value is None:
-            return None
-        if isinstance(value, float):
-            return value
-        try:
-            return float(value)
-        except TypeError as te:
-            msg = (f"failed to convert value to float: key={key}, "
-                   f"value={value}, value-type:{type(value)} error={str(te)}")
-            raise RuntimeError(msg)
+            token_stdout = version_ret.get("stdout")
+            jointoken: str = join_token.extract_join_token(token_stdout)
+            if not jointoken:
+                msg = f"""Bad token generate stdout format
+                    token_stdout={token_stdout}
+                """
+                raise RuntimeError(msg)
+            self.action_data.join_token = jointoken
+        return self.action_data.join_token
 
     def _get_original_task_args_key(self) -> List[str]:
         return [*self._task.args]
@@ -715,15 +662,17 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             with_registration_check: bool = True
     ) -> None:
         original_task_args = self._task.args
-        service_scope = self._get_spire_agent_service_scope()
-        agent_dirs: AgentDirs = self.action_data.agent_dirs
+        service_scope = self._get_service_scope_str()
+        dirs: AgentDirs = self.action_data.dirs
         module_args = {
-            "spire_agent_config_dir": agent_dirs.spire_agent_config_dir,
-            "spire_agent_data_dir": agent_dirs.spire_agent_data_dir,
-            "spire_agent_install_dir": agent_dirs.spire_agent_install_dir,
+            "spire_agent_config_dir": dirs.config_dir,
+            "spire_agent_data_dir": dirs.data_dir,
+            "spire_agent_install_dir": dirs.install_dir,
+            "spire_agent_log_dir": dirs.log_dir,
+            "spire_agent_service_dir": dirs.service_dir,
             "spire_agent_socket_path":
                 self._get_str_from_original_task_args("spire_agent_socket_path"),
-            "spire_agent_service_name": agent_dirs.spire_agent_service_name,
+            "spire_agent_service_name": dirs.service_full_name,
             "spire_agent_service_scope": service_scope
         }
 
@@ -745,7 +694,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             registration_info = self._get_spire_agent_registration_info(agent_info)
             matching_registration: List[AgentRegistrationEntry] = \
                 registration_info.select_matching_registration(
-                    spiffe_id=agent_info.spire_agent_spiffe_id,
+                    spiffe_id=agent_info.spiffe_id,
                     attestation_type="join_token",
                     serial_number=agent_info.spire_agent_serial_number_as_int()
                 )
@@ -760,14 +709,14 @@ class ActionModule(ActionBase):  # type: ignore[misc]
     def _get_spire_agent_registration_info(
             self, agent_info: AgentInfoResultAdapter
     ) -> AgentRegistrationInfoResultAdapter:
-        if not agent_info.spire_agent_spiffe_id:
+        if not agent_info.spiffe_id:
             return AgentRegistrationInfoResultAdapter({})
 
         spire_server_install_dir = self._get_str_from_original_task_args("spire_server_install_dir")
         uds_path = self._get_str_from_original_task_args("spire_server_registration_uds_path")
-        agent_dirs: AgentDirs = self.action_data.agent_dirs
+        dirs: AgentDirs = self.action_data.dirs
         module_args = {
-            "spire_agent_spiffe_id": agent_info.spire_agent_spiffe_id,
+            "spire_agent_spiffe_id": agent_info.spiffe_id,
             "spire_server_install_dir": spire_server_install_dir,
             "spire_server_registration_uds_path": uds_path
         }
@@ -823,39 +772,6 @@ class ActionModule(ActionBase):  # type: ignore[misc]
         task_vars = variable_manager.get_vars(play=play, task=task, host=host)
         return task_vars, task, host
 
-    def _download_spire_release(self) -> None:
-        # Using the controller as download platform.
-        # Idea: You may have a dedicated download node for security and performance reason
-
-        target_host = "localhost"
-
-        download_target_dir = os.path.join(constants.DEFAULT_LOCAL_TMP, "spire")
-        os.makedirs(name=download_target_dir, exist_ok=True)
-        version = self._get_str_from_original_task_args("spire_agent_version")
-        url = self._get_str_from_original_task_args("spire_download_url")
-        filename = url_filename(url)
-        if not filename:
-            # todo put current host name into name!?!
-            filename = f"spire-{version}-linux-x86_64-glibc.tar.gz"
-        filepath = os.path.join(download_target_dir, filename)
-        delegate_to_old = self._task.delegate_to
-
-        module_args = {
-            "url": url,
-            "dest": filepath,
-        }
-        data = {
-            "name": f"{self._task.get_name()}-get-url",
-            "get_url": module_args,
-        }
-
-        version_ret = self._run_sub_task(task_data=data, hostname=target_host)
-        assert_task_did_not_failed(
-            version_ret,
-            f"Fail to download spire binary with  get_url({delegate_to_old} --> {target_host})")
-
-        self.action_data.downloaded_dist_path = version_ret.get("dest")
-
     def execute_module_spire_agent(self, task_vars: Dict[str, Any]) -> None:
         ret = self._execute_module(
             module_name='io_patricecongo.spire.spire_agent',
@@ -863,6 +779,11 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             task_vars=task_vars)
         if ret.get("failed", False):
             raise RuntimeError(f"spire agent module failed: {ret}")
+    def need_spire_binary_change(self) -> bool:
+        need_change: bool = self.diff_actual_expected.need_binary_change(
+            bin_file=self.action_data.dirs.path_executable
+        )
+        return need_change
 
     def run(
         self, tmp: Any = None, task_vars: Dict[str, Any] = None
@@ -872,22 +793,26 @@ class ActionModule(ActionBase):  # type: ignore[misc]
         tv = dict(task_vars)
         changed = False
         try:
-            self.action_data.agent_templates = AgentTemplates()
-            self.action_data.expected_state = StateOfAgent.from_task_args(self._task.args)
-            self.action_data.local_temp_work_dir = make_local_temp_work_dir()
-            self.action_data.agent_dirs = AgentDirs(self._get_str_from_original_task_args)
+            self.action_data.templates = AgentTemplates()
+            #self.action_data.expected_state = StateOfAgent.from_task_args(self._task.args)
+            self.action_data.local_temp_work_dir = make_local_temp_work_dir("spire-agent-work-dir")
+            self.action_data.dirs = AgentDirs.from_ansible_src(self._get_str_from_original_task_args)
+            self.__ensure_expected_config_available_locally(task_vars=tv)
 
             self._get_spire_agent_info(task_vars=tv)
+            self.diff_actual_expected = self.action_data.diff()
 
-            if self.action_data.need_change():
+            if self.diff_actual_expected.need_change(): # self.action_data.need_change():
                 changed = True
                 if State.present == self.action_data.expected_state.state:
                     self._get_join_token(task_vars=tv)
                     self._get_spire_server_bundle()
                     self._get_spire_server_version(task_vars=tv)
-                    self._download_spire_release()
-                    self._ensure_spire_agent_dir_structure_and_binary_available(task_vars=tv)
-                    self._ensure_spire_agent_service_files_installed(task_vars=tv)
+                    self.action_data.downloaded_dist_path = self._download_spire_release(
+                        download_decider=self.need_spire_binary_change
+                    )
+                    self._ensure_dir_structure_and_binary_available(task_vars=tv)
+                    self._ensure_service_files_installed(task_vars=tv)
                 self.execute_module_spire_agent(task_vars=tv)
                 self._get_spire_agent_info(task_vars=tv)
 

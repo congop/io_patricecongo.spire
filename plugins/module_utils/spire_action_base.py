@@ -20,52 +20,50 @@
 
 # Make coding more python3-ish, this is required for contributions to Ansible
 from abc import abstractmethod
-from datetime import datetime, time, timezone
+from contextlib import contextmanager
+import itertools
 import os
-from os.path import dirname
+import tempfile
 from typing import Any, Callable, Dict, Generator, List, NamedTuple, Tuple, Union, cast
 
-from contextlib import contextmanager
-
 from ansible import constants
-from ansible.playbook import task as module_task
-from ansible.plugins.action import ActionBase
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils import strings
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.file_stat import RemoteFileAccessFacade
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.users import User
-
-try:
-    from ansible.modules import get_url
-except (ModuleNotFoundError, ImportError):
-    # for ansible 2.9.x
-    # from ansible.modules.net_tools.basics import get_url
-    import importlib
-    get_url = importlib.import_module("ansible.modules.net_tools.basics.get_url")
-
-import tempfile
-from urllib.parse import urlparse
-
 from ansible.inventory.host import Host
 from ansible.inventory.manager import InventoryManager
 from ansible.parsing import dataloader
+from ansible.playbook import task as module_task
 from ansible.playbook.play import Play
 from ansible.playbook.play_context import PlayContext
 from ansible.playbook.task import Task
 from ansible.plugins import loader as plugins_loader
+from ansible.plugins.action import ActionBase
 from ansible.plugins.connection.__init__ import ConnectionBase
-from ansible.plugins.connection.local import Connection
 from ansible.template import Templar
 from ansible.vars.manager import VariableManager
+from ansible_collections.io_patricecongo.spire.plugins.module_utils import strings
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.diffs import (
+    DiffABC,
+    DigestDiff,
+    StrResourceDiff,
+    VersionDiff,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.file_stat import (
+    FileStatDiff,
+    RemoteFileAccessFacade,
+)
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_outcome import (
+    assert_shell_or_cmd_task_successful,
+    assert_task_did_not_failed,
+)
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.net_utils import (
     is_localhost,
     url_filename,
 )
-
-from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_outcome import (
-    assert_shell_or_cmd_task_successful,
-    assert_task_did_not_failed
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing import (
+    StateOfAgentDiff,
+    StateOfServerDiff,
 )
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.users import User
+
 
 def _identity(m: Dict[str,Any]) -> Dict[str,Any]:
     return m
@@ -83,10 +81,114 @@ class SpireTemplateRes(NamedTuple):
     extra_vars: Dict[str, Any]
 
 
-# https://gist.github.com/ju2wheels/408e2d34c788e417832c756320d05fb5
-# use_vars = task_vars.get('ansible_delegated_vars')[self._task.delegate_to]
-# /home/patdev/software/ansible/ansible-modules-spire/.venv/lib/python3.6/site-packages/ansible/plugins/action/__init__.py
-#  @ 155  def _configure_module
+class DiffSpireCmptActualExpected:
+    # if system dir ignore actual,expected = exists, None
+    #   - may be you want to avoid changing their attrs
+    #   - though creating them is legitimate
+    #   example: /va/log , /etc/system/systemd, /usr/local/bin
+    #         at user-home:  ~/.local/bin/, <home-systemd>, ~/.config/systemd/user/
+    # Never acccept / as directory
+    def __init__(
+        self,
+        file_attrs: List[FileStatDiff],
+        file_contents: List[DigestDiff],
+        exe_versions: List[VersionDiff],
+        state_diff: Union[StateOfServerDiff, StateOfAgentDiff],
+        scope_diff: StrResourceDiff
+    ) -> None:
+        self.no_diff: bool = DiffABC.no_diff_from_iterables(
+            [state_diff, scope_diff], exe_versions,
+            file_attrs, file_contents
+        )
+        self.file_attrs: List[FileStatDiff] = file_attrs
+        self.file_contents: List[DigestDiff] = file_contents
+        self.exe_versions: List[VersionDiff] = exe_versions
+        self.state_diff: Union[StateOfServerDiff, StateOfAgentDiff] = state_diff
+        self.scope_diff: StrResourceDiff = scope_diff
+
+    def to_ansible_diff_header_before_after_list(self) -> List[Dict[str, Any]]:
+        h_file_attrs = DiffABC.to_ansible_diff_header_before_after_list(
+            diffs=self.file_attrs
+        )
+        h_file_contents = DiffABC.to_ansible_diff_header_before_after_list(
+            diffs=self.file_contents
+        )
+        h_exe_versions = DiffABC.to_ansible_diff_header_before_after_list(
+            diffs=self.exe_versions
+        )
+        h_state = DiffABC.to_ansible_diff_header_before_after_list(
+            diffs=[self.state_diff, self.scope_diff]
+        )
+        return [
+                *h_file_attrs,
+                *h_file_contents,
+                *h_exe_versions,
+                *h_state
+        ]
+
+
+    def ansible_diff_outcome_part(
+        self, diff_activated: bool
+    ) -> Dict[str, List[Dict[str,str]]]:
+
+        if not diff_activated:
+            return {}
+        if self.no_diff:
+            return {"diff":[]}
+        outcome_part = {
+            "diff": self.to_ansible_diff_header_before_after_list()
+        }
+        return outcome_part
+
+    def ansible_failed_outcome_part_given_no_diff_expected(self) -> Dict[str, Any]:
+        if self.no_diff:
+            return {}
+        before_afters = self.to_ansible_diff_header_before_after_list()
+        msg = f"no diff expected but got: {before_afters}"
+        return {
+            "failed": True,
+            "msg": msg
+        }
+
+    def need_change(self) -> bool:
+        return not self.no_diff
+
+    def need_binary_change(self, bin_file: str) -> bool:
+        if self.no_diff:
+            return False
+        diff_src = itertools.chain(self.file_contents, self.exe_versions)
+        no_diff = all(
+            map(
+                DiffABC.no_diff,
+                filter(DiffABC.predicate_diffing_resource(bin_file), diff_src)
+            )
+        )
+        return not no_diff
+
+    def dirs_needing_change(self, dirs: List[str])->List[str]:
+        # dirs_to_change = list(map(
+        #         DiffABC.get_resource_id,
+        #         filter(DiffABC.predicate_diffing_any_of(dirs), self.file_attrs)
+        #     ))
+        dirs_to_change = [
+            d.resource_id
+            for d in self.file_attrs
+            if d.resource_id in dirs
+        ]
+        return dirs_to_change
+
+    def need_content_change(self, file:str) -> bool:
+        need_change: bool = DiffABC.need_change(
+            file=file, diffs=self.file_contents, diffs_label="file_contents"
+        )
+        return need_change
+
+    def need_attrs_change(self, file:str) -> bool:
+        need_change: bool = DiffABC.need_change(
+            file=file, diffs=self.file_attrs, diffs_label="file_attrs"
+        )
+        return need_change
+
 class SpireActionBase(ActionBase,RemoteFileAccessFacade):  # type: ignore[misc]
     """'abstract' class which hold base feature used to build spire_ser and spire-agent action.
     """
@@ -205,6 +307,7 @@ class SpireActionBase(ActionBase,RemoteFileAccessFacade):  # type: ignore[misc]
         ret = self._run_sub_task(task_data=task_data, hostname=target_host_local, action_name='template')
         if ret.get("failed", False):
             msg = f"""Fail to local template {template_label}:
+                res:{res}
                 return={ret}
             """
             raise RuntimeError(msg)
@@ -272,6 +375,19 @@ class SpireActionBase(ActionBase,RemoteFileAccessFacade):  # type: ignore[misc]
         except TypeError as te:
             msg = (f"failed to convert value to float: key={key}, "
                    f"value={value}, value-type:{type(value)} error={str(te)}")
+            raise RuntimeError(msg)
+
+    def _get_int_from_original_task_args(self, key: str) -> float:
+        value = self._task.args.get(key)
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        try:
+            return int(value)
+        except TypeError as te:
+            msg = (f"failed to convert value to float: key={key}, "
+                   f"value={value}, value-type:{int(value)} error={str(te)}")
             raise RuntimeError(msg)
 
     def _get_original_task_args_key(self) -> List[str]:

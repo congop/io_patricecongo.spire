@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
 from packaging import version
-from typing import Any, NamedTuple, NoReturn, Tuple, cast
+from typing import Any, Tuple, cast
 
 def version_change_within_one_minor(
     v1: version.Version,
