@@ -22,19 +22,14 @@
 from datetime import datetime, timezone
 import os
 import time
-from typing import Any, Callable, Dict, List, Tuple, Union, cast
+from typing import Any, Callable, Dict, List, Union, cast
 
-from ansible.inventory.host import Host
-from ansible.inventory.manager import InventoryManager
 from ansible.parsing import dataloader
-from ansible.playbook import task as module_task
-from ansible.playbook.play import Play
 from ansible.playbook.play_context import PlayContext
 from ansible.playbook.task import Task
 from ansible.plugins import loader as plugins_loader
 from ansible.plugins.connection.__init__ import ConnectionBase
 from ansible.template import Templar
-from ansible.vars.manager import VariableManager
 from ansible_collections.io_patricecongo.spire.plugins.module_utils import join_token, logging
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.agent_templates.resources import (
     AgentTemplates,
@@ -58,10 +53,10 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_outco
     assert_shell_or_cmd_task_successful,
     assert_task_did_not_failed,
 )
-
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_action_base import (
     DiffSpireCmptActualExpected,
     SpireActionBase,
+    SpireCmptInfoResultAdapter,
     SpireTemplateRes,
     make_local_temp_work_dir,
 )
@@ -76,7 +71,6 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing
     StateOfAgent,
     StateOfAgentDiff,
     SubStateAgentRegistered,
-    SubStateServiceInstallation,
     SubStateServiceStatus,
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.systemd import Scope
@@ -115,35 +109,39 @@ class AgentRegistrationInfoResultAdapter:
         return [e for e in self.registrations if matches_criteria(e)]
 
 
-class AgentInfoResultAdapter:
+class AgentInfoResultAdapter(SpireCmptInfoResultAdapter):
+
     def __init__(self, result: Dict[str, Any]) -> None:
-        result = result or {}
-        self.result = result or {}
-        self.installed: bool = result.get("spire_agent_installed", "False")
-        self.spiffe_id: str = result.get("spire_agent_spiffe_id")
+        if result is None:
+            result = {}
+        super().__init__(
+            result = result or {},
+            installed=result.get("spire_agent_installed", "False"),
+            version=result.get("spire_agent_version"),
+            version_issue=result.get("spire_agent_version_issue"),
+            executable_path=result.get("spire_agent_executable_path"),
+            trust_domain_id=result.get("spire_agent_trust_domain_id"),
+            trust_domain_id_issue=result.get("spire_agent_trust_domain_id_issue"),
+            is_healthy=result.get("spire_agent_is_healthy", False),
+            is_healthy_issue=result.get("spire_agent_is_healthy_issue"),
+            service_scope=Scope.by_name(result.get("spire_agent_service_scope")),
+            service_scope_issue=result.get("spire_agent_service_scope_issue"),
+            service_installed=result.get("spire_agent_service_installed", False),
+            service_installed_issue=result.get("spire_agent_service_installed_issue"),
+            service_running=result.get("spire_agent_service_running", False),
+            service_running_issue=result.get("spire_agent_service_running_issue"),
+            service_enabled=result.get("spire_agent_service_enabled", False),
+            service_enabled_issue=result.get("spire_agent_service_enabled_issue"),
+            hexdigest_service_file=result.get("spire_agent_hexdigest_service_file"),
+            hexdigest_service_file_issue=result.get("spire_agent_hexdigest_service_file_issue"),
+            hexdigest_config_file=result.get("spire_agent_hexdigest_config_file"),
+            hexdigest_config_file_issue=result.get("spire_agent_hexdigest_config_file_issue"),
+            file_stats=FileStats.from_ansible_result(result, "spire_agent_file_stats")
+        )
+        self.spiffe_id=result.get("spire_agent_spiffe_id")
         self.serial_number: str = result.get("spire_agent_serial_number")
         self.spiffe_id_issue: str = result.get("spire_agent_spiffe_id_issue")
-        self.version: str = result.get("spire_agent_version")
-        self.version_issue: str = result.get("spire_agent_version_issue")
-        self.executable_path: str = result.get("spire_agent_executable_path")
-        self.trust_domain_id: bool = result.get("spire_agent_trust_domain_id")
-        self.trust_domain_id_issue: str = result.get("spire_agent_trust_domain_id_issue")
-        self.is_healthy: bool = result.get("spire_agent_is_healthy", False)
-        self.is_healthy_issue: str = result.get("spire_agent_is_healthy_issue")
-        self.service_scope: Scope = Scope.by_name(result.get("spire_agent_service_scope") )
-        self.service_scope_issue: str = result.get("spire_agent_service_scope_issue")
-        self.service_installed: bool = result.get("spire_agent_service_installed", False)
-        self.service_installed_issue: str = result.get("spire_agent_service_installed_issue")
-        self.service_running: bool = result.get("spire_agent_service_running", False)
-        self.service_running_issue: str = result.get("spire_agent_service_running_issue")
-        self.service_enabled: bool = result.get("spire_agent_service_enabled", False)
-        self.service_enabled_issue: str = result.get("spire_agent_service_enabled_issue")
         self.is_registered: bool = False
-        self.hexdigest_service_file = result.get("spire_agent_hexdigest_service_file")
-        self.hexdigest_service_file_issue = result.get("spire_agent_hexdigest_service_file_issue")
-        self.hexdigest_config_file = result.get("spire_agent_hexdigest_config_file")
-        self.hexdigest_config_file_issue = result.get("spire_agent_hexdigest_config_file_issue")
-        self.file_stats: FileStats = FileStats.from_ansible_result(result, "spire_agent_file_stats")
 
     def spire_agent_serial_number_as_int(self) -> int:
         '''Return the serial number as interger  or -1 if no value is avalaible yet'''
@@ -151,44 +149,18 @@ class AgentInfoResultAdapter:
             return int(self.serial_number)
         return None
 
-    def __get_issues_issues(self) -> str:
-        issues_str = "\n".join([value for key, value in self.result.items() if key.endswith("_issue") and value])
-        return issues_str or None
-
     def __get_state_registered(self) -> SubStateAgentRegistered:
         if self.is_registered:
             return SubStateAgentRegistered.yes
         else:
             return SubStateAgentRegistered.no
 
-    def __get_state(self) -> State:
-        if self.installed:
-            return State.present
-        else:
-            return State.absent
-
-    def __get_state_service_status(self) -> SubStateServiceStatus:
-        if self.is_healthy:
-            return SubStateServiceStatus.healthy
-        elif self.service_running:
-            return SubStateServiceStatus.started
-        else:
-            return SubStateServiceStatus.stopped
-
-    def __get_state_service_installation(self) -> SubStateServiceInstallation:
-        if self.service_enabled:
-            return SubStateServiceInstallation.enabled
-        elif self.service_installed:
-            return SubStateServiceInstallation.installed
-        else:
-            return SubStateServiceInstallation.not_installed
-
     def to_detected_state(self) -> StateOfAgent:
         return StateOfAgent(
-            state=self.__get_state(),
+            state=self._get_state(),
             substate_agent_registered=self.__get_state_registered(),
-            substate_service_installation=self.__get_state_service_installation(),
-            substate_service_status=self.__get_state_service_status()
+            substate_service_installation=self._get_state_service_installation(),
+            substate_service_status=self._get_state_service_status()
         )
 
     def to_ansible_return_data(self) -> Dict[str, Union[str, bool, Dict[str, Any]]]:
@@ -199,7 +171,7 @@ class AgentInfoResultAdapter:
                 "actual_spire_agent_spiffe_id": self.spiffe_id,
                 "actual_spire_agent_trust_domain_id": self.trust_domain_id,
                 "actual_spire_agent_executable_path": self.executable_path,
-                "actual_spire_agent_get_info_issue": self.__get_issues_issues(),
+                "actual_spire_agent_get_info_issue": self._get_issues_issues(),
                 "actual_spire_agent_get_info_result": self.result
                 }
 
@@ -382,7 +354,7 @@ class ActionModule(SpireActionBase):
             shared_loader_obj=shared_loader_obj,
             module_fq_name="io_patricecongo.spire.spire_agent")
         self.action_data: AgentActionData = AgentActionData()
-        self.diff_actual_expected: DiffSpireCmptActualExpected = None
+        # self.diff_actual_expected: DiffSpireCmptActualExpected = None
 
     def _get_spire_server(self) -> str:
         return "spire_server"
@@ -537,7 +509,7 @@ class ActionModule(SpireActionBase):
     def _wait_for_spire_agent_healthy(self, task_vars: Dict[str, Any] = None) -> None:
         def found_that_agent_is_healthy() -> bool:
             info = self.action_data.spire_agent_info
-            is_healthy = info.is_healthy
+            is_healthy: bool = info.is_healthy
             return is_healthy
 
         self._get_spire_agent_info(task_vars=task_vars, with_registration_check=False)
@@ -739,46 +711,17 @@ class ActionModule(SpireActionBase):
 
         return AgentRegistrationInfoResultAdapter(registration_ret)
 
-    def _make_module_task_vars(
-            self, task_data: Dict[str, Any], hostname: str = None
-    ) -> Tuple[Dict[str, Any], Task, Host]:
-        original_task: module_task.Task = self._task
-        variable_manager: VariableManager = original_task.get_variable_manager()
-        data_loader = original_task.get_loader()
-        inventory: InventoryManager = variable_manager._inventory
-        host = None if not hostname else inventory.get_host(hostname)
-        play_data = {
-            "hosts": hostname,
-            "tasks": [task_data]
+    def __service_state_to_stopped(self, task_args: Dict[str, Any]) -> Dict[str, Any]:
+        info = self.get_info()
+        return {
+            **task_args,
+            "substate_service_status": SubStateServiceStatus.stopped.name,
+            "spire_agent_version": info.version
         }
-        play: Play = Play.load(play_data,
-                               variable_manager=variable_manager,
-                               loader=data_loader, vars=None)
 
-        # task: Task = module_task.Task.load(data=task_data,
-        #     variable_manager=variable_manager,
-        #     loader=data_loader)
-        task = play.get_tasks()[0][0]
-        task_vars = variable_manager.get_vars(play=play, task=task, host=host)
-        return task_vars, task, host
+    def get_info(self) -> SpireCmptInfoResultAdapter:
+        return self.action_data.spire_agent_info
 
-    def _make_task_vars(
-            self, task: Task, hostname: str = None, play: Play = None
-    ) -> Tuple[Dict[str, Any], Task, Host]:
-        variable_manager: VariableManager = task.get_variable_manager()
-        # data_loader = task.get_loader()
-        inventory: InventoryManager = variable_manager._inventory
-        host = None if not hostname else inventory.get_host(hostname)
-        task_vars = variable_manager.get_vars(play=play, task=task, host=host)
-        return task_vars, task, host
-
-    def execute_module_spire_agent(self, task_vars: Dict[str, Any]) -> None:
-        ret = self._execute_module(
-            module_name='io_patricecongo.spire.spire_agent',
-            module_args=self._task.args,
-            task_vars=task_vars)
-        if ret.get("failed", False):
-            raise RuntimeError(f"spire agent module failed: {ret}")
     def need_spire_binary_change(self) -> bool:
         need_change: bool = self.diff_actual_expected.need_binary_change(
             bin_file=self.action_data.dirs.path_executable
@@ -792,9 +735,9 @@ class ActionModule(SpireActionBase):
 
         tv = dict(task_vars)
         changed = False
+        failed_contrib: Dict[str, Any] = {}
         try:
             self.action_data.templates = AgentTemplates()
-            #self.action_data.expected_state = StateOfAgent.from_task_args(self._task.args)
             self.action_data.local_temp_work_dir = make_local_temp_work_dir("spire-agent-work-dir")
             self.action_data.dirs = AgentDirs.from_ansible_src(self._get_str_from_original_task_args)
             self.__ensure_expected_config_available_locally(task_vars=tv)
@@ -802,9 +745,16 @@ class ActionModule(SpireActionBase):
             self._get_spire_agent_info(task_vars=tv)
             self.diff_actual_expected = self.action_data.diff()
 
-            if self.diff_actual_expected.need_change(): # self.action_data.need_change():
+            if self.get_check_mode():
+                cm_ret: Dict[str, Any] = self.check_mode_ansible_return()
+                return cm_ret
+
+            if self.diff_actual_expected.need_change():
                 changed = True
                 if State.present == self.action_data.expected_state.state:
+                    self.stop_spire_cmpt_service_if_running(
+                        task_args_mapper=self.__service_state_to_stopped,
+                        task_vars=tv)
                     self._get_join_token(task_vars=tv)
                     self._get_spire_server_bundle()
                     self._get_spire_server_version(task_vars=tv)
@@ -813,9 +763,10 @@ class ActionModule(SpireActionBase):
                     )
                     self._ensure_dir_structure_and_binary_available(task_vars=tv)
                     self._ensure_service_files_installed(task_vars=tv)
-                self.execute_module_spire_agent(task_vars=tv)
+                self._execute_actual_spire_ansible_module(task_vars=tv)
                 self._get_spire_agent_info(task_vars=tv)
-
+                diff_after_change: DiffSpireCmptActualExpected = self.action_data.diff()
+                failed_contrib = diff_after_change.ansible_failed_outcome_part_given_no_diff_expected()
         except Exception as e:
             msg = f"""Error while running spire-agent action:
                     message:{str(e)}
@@ -828,6 +779,10 @@ class ActionModule(SpireActionBase):
             ret = {
                 'changed': changed,
                 **self.action_data.to_ansible_retun_data_failed_entry(),
+                **failed_contrib,
+                **self.diff_actual_expected.ansible_diff_outcome_part(
+                        diff_activated=self.get_diff_mode()
+                ),
                 **self.action_data.to_ansible_return_data()
             }
             return ret

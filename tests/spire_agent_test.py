@@ -336,7 +336,7 @@ def test_pire_agent(
     # ansible.plugins.connection.local.Connection
     connection: Connection = connection_loader.get('local', play_context, os.devnull)
 
-    data = {
+    data: Dict[str, Any] = {
         "name": "spire-agent-local1",
         "io_patricecongo.spire.spire_agent": {
             "state": expected_state.state.name,
@@ -417,6 +417,32 @@ def test_pire_agent(
             "enabled": agent_srv_enabled_res,
             "running": agent_srv_running_res,
             "expected_local_probing": expected_local_probing
+        }
+
+    ### check-mode diff
+    data["check_mode"] = True
+    data["diff"] = True
+    task = Task.load(data=data,
+                           variable_manager=var_manager,
+                           loader=data_loader)
+
+    all_vars = var_manager.get_vars(play=play, task=task,
+                                    host=inventory.get_host("localhost"))
+
+
+    action = spire_agent.ActionModule(
+        task=task, connection=connection, play_context=play_context,
+        loader=data_loader, templar=templar, shared_loader_obj=plugins_loader)
+    server_runner.register_extra_cleanup_task(action.cleanup)
+    action._low_level_execute_command = functools.partial(
+                                            _low_level_execute_command,
+                                            action._low_level_execute_command)
+    ret = action.run(task_vars={**all_vars})
+    ###
+
+    assert ret == {"changed":False, "diff": []}, \
+        {   "actual": ret,
+            "expected":{"changed":False, "diff": []}
         }
 
 

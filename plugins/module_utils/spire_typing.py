@@ -216,6 +216,24 @@ class StateOfAgent:
             substate_service_status=SubStateServiceStatus.by_name(args_status)
         )
 
+    @staticmethod
+    def from_ansible_return_data(task_outcome: Dict[str, Any]) -> "StateOfAgent":
+
+        state_str = task_outcome["actual_state"]
+        installation_str = task_outcome["actual_substate_service_installation"]
+        status_str = task_outcome["actual_substate_service_status"]
+        registered = task_outcome.get("actual_substate_agent_registered")
+        # state = State.by_name(state_str)
+        # substate_srv_installation = SubStateServiceInstallation.by_name(substate_srv_installation_str)
+        # substate_srv_status = SubStateServiceStatus.by_name(substate_srv_status_str)
+        # substate_agent_registered=SubStateAgentRegistered.from_bool_or_str(args_registered),
+        return StateOfAgent(
+            state=State.by_name(state_str),
+            substate_agent_registered=SubStateAgentRegistered.from_bool_or_str(registered),
+            substate_service_installation=SubStateServiceInstallation.by_name(installation_str),
+            substate_service_status=SubStateServiceStatus.by_name(status_str)
+        )
+
 
 class BoolResultWithIssue(NamedTuple):
     res: bool

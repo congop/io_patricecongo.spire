@@ -52,6 +52,10 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing
     SubStateServiceStatus,
 )
 
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_assertions import(
+    assert_not_handling_check_mode_since_action_reponsibility
+)
+
 ANSIBLE_METADATA = {
     'metadata_version': '0.0.1',
     'status': ['preview'],
@@ -370,7 +374,6 @@ def run_module() -> None:
     module_args = _module_args()
 
 
-    # TODO check if check_mode does make any sens?
     module = AnsibleModule(
         argument_spec=module_args,
         supports_check_mode=True
@@ -381,6 +384,8 @@ def run_module() -> None:
     func_log = logging.CachingLogger(module.log)
 
     try:
+        assert_not_handling_check_mode_since_action_reponsibility(module)
+
         dirs: AgentDirs = AgentDirs(
             config_dir=module.params["spire_agent_config_dir"],
             data_dir=module.params["spire_agent_data_dir"],

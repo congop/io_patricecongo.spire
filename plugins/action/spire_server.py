@@ -52,7 +52,7 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.server_templ
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_action_base import (
     DiffSpireCmptActualExpected,
-    SpireActionBase,
+    SpireActionBase, SpireCmptInfoResultAdapter,
     SpireTemplateRes,
     make_local_temp_work_dir,
 )
@@ -63,7 +63,6 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing
     State,
     StateOfServer,
     StateOfServerDiff,
-    SubStateServiceInstallation,
     SubStateServiceStatus,
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.systemd import Scope
@@ -73,65 +72,50 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.tar_utils im
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.users import User
 
 
-class ServerInfoResultAdapter:
+class ServerInfoResultAdapter(SpireCmptInfoResultAdapter[StateOfServer]):
+
     def __init__(self, result: Dict[str, Any]) -> None:
-        result = result or {}
-        self.result = result or {}
-        self.spire_server_installed: bool = result.get("spire_server_installed", "False")
-        self.spire_server_version: str = result.get("spire_server_version")
-        self.spire_server_version_issue: str = result.get("spire_server_version_issue")
-        self.spire_server_executable_path: str = result.get("spire_server_executable_path")
-        self.spire_server_trust_domain_id: bool = result.get("spire_server_trust_domain_id")
-        self.spire_server_trust_domain_id_issue: str = result.get("spire_server_trust_domain_id_issue")
-        self.spire_server_is_healthy: bool = result.get("spire_server_is_healthy", False)
-        self.spire_server_is_healthy_issue: str = result.get("spire_server_is_healthy_issue")
-        self.spire_server_service_scope: Scope = Scope.by_name( result.get("spire_server_service_scope") )
-        self.spire_server_service_scope_issue: str = result.get("spire_server_service_scope_issue")
-        self.spire_server_service_installed: bool = result.get("spire_server_service_installed", False)
-        self.spire_server_service_installed_issue: str = result.get("spire_server_service_installed_issue")
-        self.spire_server_service_running: bool = result.get("spire_server_service_running", False)
-        self.spire_server_service_running_issue: str = result.get("spire_server_service_running_issue")
-        self.spire_server_service_enabled: bool = result.get("spire_server_service_enabled", False)
-        self.spire_server_service_enabled_issue: str = result.get("spire_server_service_enabled_issue")
-        self.hexdigest_service_file = result.get("spire_server_hexdigest_service_file")
-        self.hexdigest_service_file_issue = result.get("spire_server_hexdigest_service_file_issue")
-        self.hexdigest_config_file = result.get("spire_server_hexdigest_config_file")
-        self.hexdigest_config_file_issue = result.get("spire_server_hexdigest_config_file_issue")
-        self.file_stats: FileStats = FileStats.from_ansible_result(result, "spire_server_file_stats")
-
-    def __get_issues_issues(self) -> str:
-        issues_str = "\n".join([value for key, value in self.result.items() if key.endswith("_issue") and value])
-        return issues_str or None
-
-    def __get_state(self) -> State:
-        return State.from_info(self.spire_server_installed)
-
-    def __get_state_service_status(self) -> SubStateServiceStatus:
-        return SubStateServiceStatus.from_info(
-            is_healthy=self.spire_server_is_healthy,
-            is_service_running=self.spire_server_service_running
-        )
-
-    def __get_state_service_installation(self) -> SubStateServiceInstallation:
-        return SubStateServiceInstallation.from_info(
-            is_service_enabled=self.spire_server_service_enabled,
-            is_service_installed=self.spire_server_service_installed
+        if result is None:
+            result = {}
+        super().__init__(
+            result=result,
+            installed=result.get("spire_server_installed", "False"),
+            version=result.get("spire_server_version"),
+            version_issue=result.get("spire_server_version_issue"),
+            executable_path=result.get("spire_server_executable_path"),
+            trust_domain_id=result.get("spire_server_trust_domain_id"),
+            trust_domain_id_issue=result.get("spire_server_trust_domain_id_issue"),
+            is_healthy=result.get("spire_server_is_healthy", False),
+            is_healthy_issue=result.get("spire_server_is_healthy_issue"),
+            service_scope=Scope.by_name( result.get("spire_server_service_scope")),
+            service_scope_issue=result.get("spire_server_service_scope_issue"),
+            service_installed=result.get("spire_server_service_installed", False),
+            service_installed_issue=result.get("spire_server_service_installed_issue"),
+            service_running=result.get("spire_server_service_running", False),
+            service_running_issue=result.get("spire_server_service_running_issue"),
+            service_enabled=result.get("spire_server_service_enabled", False),
+            service_enabled_issue=result.get("spire_server_service_enabled_issue"),
+            hexdigest_service_file=result.get("spire_server_hexdigest_service_file"),
+            hexdigest_service_file_issue=result.get("spire_server_hexdigest_service_file_issue"),
+            hexdigest_config_file=result.get("spire_server_hexdigest_config_file"),
+            hexdigest_config_file_issue=result.get("spire_server_hexdigest_config_file_issue"),
+            file_stats=FileStats.from_ansible_result(result, "spire_server_file_stats"),
         )
 
     def to_detected_state(self) -> StateOfServer:
         return StateOfServer(
-            state=self.__get_state(),
-            substate_service_installation=self.__get_state_service_installation(),
-            substate_service_status=self.__get_state_service_status()
+            state=self._get_state(),
+            substate_service_installation=self._get_state_service_installation(),
+            substate_service_status=self._get_state_service_status()
         )
 
     def to_ansible_return_data(self) -> Dict[str, Union[str, bool, Dict[str, Any]]]:
         state_data = self.to_detected_state().to_ansible_return_data()
         return {**state_data,
-                "actual_spire_server_version": self.spire_server_version,
-                "actual_spire_server_trust_domain_id": self.spire_server_trust_domain_id,
-                "actual_spire_server_executable_path": self.spire_server_executable_path,
-                "actual_spire_server_get_info_issue": self.__get_issues_issues(),
+                "actual_spire_server_version": self.version,
+                "actual_spire_server_trust_domain_id": self.trust_domain_id,
+                "actual_spire_server_executable_path": self.executable_path,
+                "actual_spire_server_get_info_issue": self._get_issues_issues(),
                 "actual_spire_server_get_info_result": self.result
                 }
 
@@ -180,7 +164,7 @@ class ServerActionData:
         exe_versions = [
             VersionDiff(
                 resource_id=dirs.path_executable,
-                version_actual=actual.spire_server_version,
+                version_actual=actual.version,
                 version_expected=expected.spire_version
             )
         ]
@@ -215,7 +199,7 @@ class ServerActionData:
         ]
         scope_diff = StrResourceDiff(
             resource_id="spire-server-service-scope",
-            actual=Scope.noneOrScope(actual.spire_server_service_scope),
+            actual=Scope.noneOrScope(actual.service_scope),
             expected=Scope.noneOrScope(expected.service_scope)
         )
         diff = DiffSpireCmptActualExpected(
@@ -283,7 +267,7 @@ class ActionModule(SpireActionBase):
             shared_loader_obj=shared_loader_obj,
             module_fq_name="io_patricecongo.spire.spire_server")
         self.action_data: ServerActionData = ServerActionData()
-        self.diff_actual_expected: DiffSpireCmptActualExpected = None
+        #self.diff_actual_expected: DiffSpireCmptActualExpected = None
 
     def _ensure_dir_structure_and_binary_available(
             self, task_vars: Dict[str, Any] = None
@@ -432,7 +416,7 @@ class ActionModule(SpireActionBase):
     def _wait_for_spire_server_healthy(self, task_vars: Dict[str, Any] = None) -> None:
         def found_that_server_is_healthy() -> bool:
             info = self.action_data.spire_server_info
-            is_healthy = info.spire_server_is_healthy
+            is_healthy: bool = info.is_healthy
             return is_healthy
 
         import time
@@ -478,37 +462,16 @@ class ActionModule(SpireActionBase):
         self.action_data.spire_server_info = server_info
         return
 
-    def stop_spire_server(self, task_vars: Dict[str, Any]) -> None:
-        # TODO this will work only if the dir structure did not change
-        # if th current installation does not have the same dirs structure
-        #   the spire_serve module will fail
-        #   complaining that the server and its service component are not installed
+    def __service_state_to_stopped(self, task_args: Dict[str, Any]) -> Dict[str, Any]:
+        info = self.get_info()
+        return {
+            **task_args,
+            "substate_service_status": SubStateServiceStatus.stopped.name,
+            "spire_server_version": info.version
+        }
 
-        # TODO scope changes is also an issue
-        #   reason: executor and scope mismatch
-        #   e.g.    - root calling <systemctl --user ..>
-        #           - user (through su) calling <systemctl --system ...>
-
-        def service_state_to_stopped(task_args: Dict[str, Any]) -> Dict[str, Any]:
-            spire_server_info = self.action_data.spire_server_info
-            current_version = spire_server_info.spire_server_version
-
-            return {
-                **task_args,
-                "substate_service_status": SubStateServiceStatus.stopped.name,
-                "spire_server_version": current_version
-            }
-        outcome = self._execute_actual_spire_ansible_module(
-            task_vars=task_vars,
-            task_args_mapper=service_state_to_stopped
-        )
-        sos = StateOfServer.from_ansible_return_data(task_outcome=outcome)
-        if sos.substate_service_status != SubStateServiceStatus.stopped:
-            msg = f"""Fail to stop pire-server:
-                    state-of-server:{sos}
-                    task-outcome: {outcome}
-                    """
-            raise RuntimeError(msg)
+    def get_info(self) -> SpireCmptInfoResultAdapter:
+        return self.action_data.spire_server_info
 
     def need_spire_binary_change(self) -> bool:
         need_change: bool = self.diff_actual_expected.need_binary_change(
@@ -546,19 +509,16 @@ class ActionModule(SpireActionBase):
             self.diff_actual_expected = self.action_data.diff()
             self._display.vvvv(f"---------check_mode={self.get_check_mode()}, diff={self.get_diff_mode()}")
             if self.get_check_mode():
-                return {
-                    'changed': self.diff_actual_expected.need_change(),
-                    **self.diff_actual_expected.ansible_diff_outcome_part(
-                        diff_activated=self.get_diff_mode()
-                    )
-                }
+                cm_ret: Dict[str, Any] = self.check_mode_ansible_return()
+                return cm_ret
 
             if self.diff_actual_expected.need_change():
                 changed = True
                 if State.present == self.action_data.expected_state.state:
-                    # stop_spire_server_if_started()
-                    if self.action_data.spire_server_info.spire_server_service_running:
-                        self.stop_spire_server(task_vars=tv)
+                    self.stop_spire_cmpt_service_if_running(
+                        task_args_mapper=self.__service_state_to_stopped,
+                        task_vars=tv
+                    )
                     # backup_old_spire_server() backup on target_node, need to specify backup dir
                     self.action_data.downloaded_dist_path = self._download_spire_release(
                         download_decider=self.need_spire_binary_change

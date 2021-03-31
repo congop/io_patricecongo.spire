@@ -19,12 +19,12 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.#
 
 # Make coding more python3-ish, this is required for contributions to Ansible
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 import itertools
 import os
 import tempfile
-from typing import Any, Callable, Dict, Generator, List, NamedTuple, Tuple, Union, cast
+from typing import Any, Callable, Dict, Generator, Generic, List, NamedTuple, Tuple, TypeVar, Union, cast
 
 from ansible import constants
 from ansible.inventory.host import Host
@@ -47,7 +47,7 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.diffs import
     VersionDiff,
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.file_stat import (
-    FileStatDiff,
+    FileStatDiff, FileStats,
     RemoteFileAccessFacade,
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.module_outcome import (
@@ -59,9 +59,10 @@ from ansible_collections.io_patricecongo.spire.plugins.module_utils.net_utils im
     url_filename,
 )
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.spire_typing import (
-    StateOfAgentDiff,
-    StateOfServerDiff,
+    State, StateOfAgent, StateOfAgentDiff, StateOfServer,
+    StateOfServerDiff, SubStateServiceInstallation, SubStateServiceStatus,
 )
+from ansible_collections.io_patricecongo.spire.plugins.module_utils.systemd import Scope
 from ansible_collections.io_patricecongo.spire.plugins.module_utils.users import User
 
 
@@ -189,6 +190,94 @@ class DiffSpireCmptActualExpected:
         )
         return need_change
 
+
+StateOfSpireCmpt = TypeVar("StateOfSpireCmpt", StateOfAgent, StateOfServer)
+
+
+class SpireCmptInfoResultAdapter(ABC, Generic[StateOfSpireCmpt]):
+    def __init__(
+        self,
+        result: Dict[str, Any],
+        installed: bool,
+        version: str,
+        version_issue: str,
+        executable_path: str,
+        trust_domain_id: bool,
+        trust_domain_id_issue: str,
+        is_healthy: bool,
+        is_healthy_issue: str,
+        service_scope: Scope,
+        service_scope_issue: str,
+        service_installed: bool,
+        service_installed_issue: str,
+        service_running: bool,
+        service_running_issue: str,
+        service_enabled: bool,
+        service_enabled_issue: str,
+        hexdigest_service_file: str,
+        hexdigest_service_file_issue: str,
+        hexdigest_config_file: str,
+        hexdigest_config_file_issue: str,
+        file_stats: FileStats ,
+    ) -> None:
+        self.result: Dict[str, Any] = result
+        self.installed: bool = installed
+        self.version: str = version
+        self.version_issue: str = version_issue
+        self.executable_path: str = executable_path
+        self.trust_domain_id: bool = trust_domain_id
+        self.trust_domain_id_issue: str = trust_domain_id_issue
+        self.is_healthy: bool = is_healthy
+        self.is_healthy_issue: str = is_healthy_issue
+        self.service_scope: Scope = service_scope
+        self.service_scope_issue: str = service_scope_issue
+        self.service_installed: bool = service_installed
+        self.service_installed_issue: str = service_installed_issue
+        self.service_running: bool = service_running
+        self.service_running_issue: str = service_running_issue
+        self.service_enabled: bool = service_enabled
+        self.service_enabled_issue: str = service_enabled_issue
+        self.hexdigest_service_file = hexdigest_service_file
+        self.hexdigest_service_file_issue = hexdigest_service_file_issue
+        self.hexdigest_config_file = hexdigest_config_file
+        self.hexdigest_config_file_issue = hexdigest_config_file_issue
+        self.file_stats: FileStats = file_stats
+
+    def _get_issues_issues(self) -> str:
+        issues_str = "\n".join([value for key, value in self.result.items() if key.endswith("_issue") and value])
+        return issues_str or None
+
+    def _get_state(self) -> State:
+        if self.installed:
+            return State.present
+        else:
+            return State.absent
+
+    def _get_state_service_status(self) -> SubStateServiceStatus:
+        if self.is_healthy:
+            return SubStateServiceStatus.healthy
+        elif self.service_running:
+            return SubStateServiceStatus.started
+        else:
+            return SubStateServiceStatus.stopped
+
+    def _get_state_service_installation(self) -> SubStateServiceInstallation:
+        if self.service_enabled:
+            return SubStateServiceInstallation.enabled
+        elif self.service_installed:
+            return SubStateServiceInstallation.installed
+        else:
+            return SubStateServiceInstallation.not_installed
+
+    @abstractmethod
+    def to_detected_state(self) -> StateOfSpireCmpt:
+        pass
+
+    @abstractmethod
+    def to_ansible_return_data(self) -> Dict[str, Union[str, bool, Dict[str, Any]]]:
+        pass
+
+
 class SpireActionBase(ActionBase,RemoteFileAccessFacade):  # type: ignore[misc]
     """'abstract' class which hold base feature used to build spire_ser and spire-agent action.
     """
@@ -211,6 +300,7 @@ class SpireActionBase(ActionBase,RemoteFileAccessFacade):  # type: ignore[misc]
             loader=loader, templar=templar,
             shared_loader_obj=shared_loader_obj)
         self.module_fq_name:str = module_fq_name
+        self.diff_actual_expected: DiffSpireCmptActualExpected = None
 
     def _get_current_spire_target_host(self, task_vars: Dict[str, Any]) -> str:
         return cast(str, task_vars['inventory_hostname'])
@@ -608,6 +698,48 @@ class SpireActionBase(ActionBase,RemoteFileAccessFacade):  # type: ignore[misc]
     def set_check_mode(self, check_mode: bool) -> None:
         task: Task = self._task
         task.check_mode = check_mode
+
+    def check_mode_ansible_return(self) -> Dict[str, Any]:
+        return {
+            'changed': self.diff_actual_expected.need_change(),
+            **self.diff_actual_expected.ansible_diff_outcome_part(
+                diff_activated=self.get_diff_mode()
+            )
+        }
+
+    @abstractmethod
+    def get_info(self) -> SpireCmptInfoResultAdapter:
+        pass
+
+    def stop_spire_cmpt_service_if_running(
+        self,
+        task_vars: Dict[str, Any],
+        task_args_mapper: Callable[[Dict[str, Any]], Dict[str, Any]]
+    ) -> None:
+        # TODO this will work only if the dir structure did not change
+        # if th current installation does not have the same dirs structure
+        #   the spire_serve module will fail
+        #   complaining that the server and its service component are not installed
+
+        # TODO scope changes is also an issue
+        #   reason: executor and scope mismatch
+        #   e.g.    - root calling <systemctl --user ..>
+        #           - user (through su) calling <systemctl --system ...>
+
+        info: SpireCmptInfoResultAdapter = self.get_info()
+        if not info.service_running:
+            return
+        outcome = self._execute_actual_spire_ansible_module(
+            task_vars=task_vars,
+            task_args_mapper=task_args_mapper
+        )
+        state = StateOfAgent.from_ansible_return_data(task_outcome=outcome)
+        if state.substate_service_status != SubStateServiceStatus.stopped:
+            msg = f"""Fail to perform <stop> with {self.module_fq_name}:
+                    state-of-server:{state}
+                    task-outcome: {outcome}
+                    """
+            raise RuntimeError(msg)
 
     def run(
         self, tmp: Any = None, task_vars: Dict[str, Any] = None
