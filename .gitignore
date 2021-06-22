@@ -6,6 +6,7 @@ dist/*
 .venv/*
 .venv_devel/*
 .venv_ansible4_10/*
+.venv_2_11/*
 .venv_2_10/*
 .venv_2_9/*
 **/*.pyc

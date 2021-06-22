@@ -40,7 +40,7 @@ ENV LANG C.UTF-8
 RUN if [ $APT_PROXY ]; then sed -i 's/https:\/\//http:\/\/HTTPS\/\/\//' /etc/apt/sources.list; fi \
     && if [ $APT_PROXY ]; then echo  "Acquire::http::Proxy \"$APT_PROXY\";" | tee /etc/apt/apt.conf.d/00aptproxy ; fi \
     && apt-get update \
-    && apt-get install --no-install-recommends -y python3 python3-pip sudo bash ca-certificates iproute2 \
+    && apt-get install --no-install-recommends -y python3 python3-pip python3.8 python3.8-venv sudo bash ca-certificates iproute2 \
         python3-apt aptitude tree make \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /etc/apt/apt.conf.d/00aptproxy \

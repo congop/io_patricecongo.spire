@@ -35,14 +35,17 @@
 #     - make dev-local-fake-src-for-ansible-collections
 #   - create virtual environment
 #     make dev-create-venv_2_9
-#     make make dev-create-venv_2_10
+#     make dev-create-venv_2_10
+#			make dev-create-venv_2_11
 #   - run unit test
 #     make dev-pytest-all-local_2_9
 #     make dev-pytest-all-local_2_10
+#     make dev-pytest-all-local_2_11
 #   - run molecule test
 #     make make dev-ansible-galaxy-dist ## make collection distribution
 #     make dev-molecule-all-local_2_9
 #     make dev-molecule-all-local_2_10
+#     make dev-molecule-all-local_2_11
 
 #python -m pip install --upgrade pip setuptools wheel
 SHELL = /bin/bash
@@ -139,6 +142,12 @@ dev-build-requirements:
 	python3 -m pip install -r requirements.txt
 	python3 -m pip install -r dev-requirements.txt
 
+dev-build-requirements_2_9:
+	python3 -m piptools compile requirements.in
+	python3 -m piptools compile dev-requirements-2_9.in
+	python3 -m pip install -r requirements.txt
+	python3 -m pip install -r dev-requirements-2_9.txt
+
 dev-pytest-all-local_2_9:
 	. .venv_2_9/bin/activate && \
 	python --version && \
@@ -147,6 +156,12 @@ dev-pytest-all-local_2_9:
 
 dev-pytest-all-local_2_10:
 	. .venv_2_10/bin/activate && \
+	python --version && \
+	export readiness_probe_timeout_seconds=10.0 && \
+	PYTHONPATH=plugins/:__fake_src python -m pytest -vv tests/**.py
+
+dev-pytest-all-local_2_11:
+	. .venv_2_11/bin/activate && \
 	python --version && \
 	export readiness_probe_timeout_seconds=10.0 && \
 	PYTHONPATH=plugins/:__fake_src python -m pytest -vv tests/**.py
@@ -163,6 +178,13 @@ dev-molecule-all-local_2_9:
 dev-molecule-all-local_2_10:
 	build-tools/ensure-local-bridge-network-available.sh molecule-net && \
 	source .venv_2_10/bin/activate && \
+	python --version && \
+	PYTHONPATH=$(FAKE_SRC_DIR):$(PJT_MKFILE_ABSDIR)/tests \
+		molecule -c $(PJT_MKFILE_ABSDIR)/molecule/resources/base_molecule.yml test --all
+
+dev-molecule-all-local_2_11:
+	build-tools/ensure-local-bridge-network-available.sh molecule-net && \
+	source .venv_2_11/bin/activate && \
 	python --version && \
 	PYTHONPATH=$(FAKE_SRC_DIR):$(PJT_MKFILE_ABSDIR)/tests \
 		molecule -c $(PJT_MKFILE_ABSDIR)/molecule/resources/base_molecule.yml test --all
@@ -223,6 +245,15 @@ dev-create-venv-devel:
 	python -m pip install -U pip && \
 	python -m pip install ../ansible-2.10.0rc4.tar.gz;
 
+
+dev-create-venv_2_11:
+	if [[ ! -f .venv_2_11/bin/activate ]]; then python3.8 -m venv .venv_2_11; fi && \
+	. .venv_2_11/bin/activate && \
+	python -m pip install -U pip && \
+	python -m pip install ansible-core~=2.11.0 ansible~=4.1.0 && \
+	make dev-install-tools && \
+	make dev-build-requirements
+
 #python -m pip install -r dev-requirements.txt
 dev-create-venv_2_10:
 	if [[ ! -f .venv_2_10/bin/activate ]]; then python3 -m venv .venv_2_10; fi && \
@@ -240,7 +271,7 @@ dev-create-venv_2_9:
 	make dev-install-tools && \
 	make dev-build-requirements
 
-# using ansible-2.10.x
+# using ansible-2.10.x instead of 2.9.x
 # which have better ignore mechanism
 dev-ansible-galaxy-dist:
 	cd $(PJT_MKFILE_ABSDIR) && \

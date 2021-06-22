@@ -38,7 +38,7 @@ jobs:
     - name: install make tree
       run: |
         sudo apt update
-        sudo apt install -y tree make
+        sudo apt install -y tree make python3.8 python3.8-venv
 
     # - uses: docker/setup-buildx-action@v1
     #   id: buildx
@@ -90,6 +90,11 @@ jobs:
       #shell: bash -l -c {0}
       shell: bash
 
+    - name: create virtual environment with ansible 2.11.x
+      run: |
+        make dev-create-venv_2_11
+      shell: bash
+
     - name: create virtual environment with ansible 2.10.x
       run: |
         make dev-create-venv_2_10
@@ -98,6 +103,12 @@ jobs:
     - name: create virtual environment with ansible 2.9.x
       run: |
         make dev-create-venv_2_9
+      shell: bash
+
+    - name: run unit test with ansible 2.11.x
+      run: |
+        pjt_dir=$(pwd)
+        sudo su -l -s /bin/bash -c "cd $pjt_dir && env && make dev-pytest-all-local_2_11" spire
       shell: bash
 
     - name: run unit test with ansible 2.10.x
@@ -130,6 +141,11 @@ jobs:
     - name: make ansible galaxy distribution
       run: |
         make dev-ansible-galaxy-dist
+
+    - name: run molecule integration test with ansible 2.11.x
+      run: |
+        make dev-molecule-all-local_2_11
+      shell: bash
 
     - name: run molecule integration test with ansible 2.10.x
       run: |

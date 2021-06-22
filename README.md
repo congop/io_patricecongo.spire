@@ -1,8 +1,8 @@
 # Amazon AWS Collection
-The Ansible io.patricecongo.spire collection provides module to help automate the management of [Spire](https://github.com/spiffe/spire).
+The Ansible io.patricecongo.spire collection provides modules to help automate the management of [Spire](https://github.com/spiffe/spire).
 
 ## Ansible version compatibility
-This collection has been tested against following Ansible versions: >=2.9.10 <2.11.0.
+This collection has been tested against following Ansible versions: >=2.9.10 <2.12.0.
 
 ## Python version compatibility
 Python version: >=3.6.9
@@ -71,6 +71,7 @@ You are welcome to add more greatness to this project. Here some things you coul
   - create virtual environment
     - make dev-create-venv_2_9
     - make dev-create-venv_2_10
+    - make dev-create-venv_2_11
   - cache spire distribution locally
     - make -f molecule/resources/docker-spire-server/Makefile spire-distribution-cached-locally
   - Make docker images for molecule tests
@@ -78,10 +79,12 @@ You are welcome to add more greatness to this project. Here some things you coul
 - Run unit test
   - make dev-pytest-all-local_2_9
   - make dev-pytest-all-local_2_10
+  - make dev-pytest-all-local_2_11
 - Run molecule test
   - make dev-ansible-galaxy-dist
   - make dev-molecule-all-local_2_9
   - make dev-molecule-all-local_2_10
+  - make dev-molecule-all-local_2_11
 - Enjoy Coding with your favorite IDE
   - e.g. Visual Studio Code
     - code .
