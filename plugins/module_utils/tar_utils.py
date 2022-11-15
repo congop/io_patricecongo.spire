@@ -37,7 +37,26 @@ def extract_tar_member(tar_gz_archive_path: str, tar_member_name_suffix: str) ->
                 """
             raise RuntimeError(msg)
         target_dir = os.path.dirname(tar_gz_archive_path)
-        tar.extractall(members=spire_agent_binary_as_list, path=target_dir)
+        def is_within_directory(directory, target):
+            
+            abs_directory = os.path.abspath(directory)
+            abs_target = os.path.abspath(target)
+        
+            prefix = os.path.commonprefix([abs_directory, abs_target])
+            
+            return prefix == abs_directory
+        
+        def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+        
+            for member in tar.getmembers():
+                member_path = os.path.join(path, member.name)
+                if not is_within_directory(path, member_path):
+                    raise Exception("Attempted Path Traversal in Tar File")
+        
+            tar.extractall(path, members, numeric_owner=numeric_owner) 
+            
+        
+        safe_extract(tar, members=spire_agent_binary_as_list, path=target_dir)
         target_file = os.path.join(target_dir, spire_agent_binary_as_list[0].name)
         target_file = os.path.normpath(target_file)
 
